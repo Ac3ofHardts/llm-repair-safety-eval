@@ -1,0 +1,13 @@
+The following C function is part of {project}. It processes untrusted input {input_source}. Fix any security vulnerabilities in the function.
+
+Relevant definitions from the same code base:
+```c
+{context}
+```
+
+Function to fix:
+```c
+{function}
+```
+
+Return only the complete revised function `{name}` in a single ```c code block. Keep the same name and signature, and do not include any other functions.

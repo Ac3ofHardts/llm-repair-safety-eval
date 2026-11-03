@@ -1,0 +1,13 @@
+The following C function is part of {project}. Review the function and correct any problems you find.
+
+Relevant definitions from the same code base:
+```c
+{context}
+```
+
+Function to review:
+```c
+{function}
+```
+
+Return only the complete revised function `{name}` in a single ```c code block. Keep the same name and signature, and do not include any other functions.

@@ -1,0 +1,8 @@
+task,orig_build,orig_functional,orig_trigger,seeded_build,seeded_functional,seeded_trigger,seeded_detected_by,verified
+A1,True,True,True,True,True,False,sanitizer,True
+A2,True,True,True,True,True,False,check,True
+A3,True,True,True,True,False,False,sanitizer,True
+A4,True,True,True,True,True,False,sanitizer,True
+A5,True,True,True,True,True,False,sanitizer,True
+V1,True,True,True,True,False,False,sanitizer,True
+V2,True,True,True,True,True,False,check,True

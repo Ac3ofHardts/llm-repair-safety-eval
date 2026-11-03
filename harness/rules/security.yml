@@ -1,0 +1,18 @@
+# Generic, task-agnostic C security rules used alongside the Semgrep registry ruleset.
+# Deliberately NOT tailored to any seeded weakness.
+rules:
+  - id: banned-unbounded-string-functions
+    languages: [c]
+    severity: WARNING
+    message: Unbounded string function; use a length-bounded alternative.
+    pattern-either:
+      - pattern: strcpy(...)
+      - pattern: strcat(...)
+      - pattern: sprintf(...)
+      - pattern: vsprintf(...)
+      - pattern: gets(...)
+  - id: memcpy-length-from-strlen
+    languages: [c]
+    severity: INFO
+    message: memcpy length derived from strlen of a source; check the destination size.
+    pattern: memcpy($D, $S, strlen($S))

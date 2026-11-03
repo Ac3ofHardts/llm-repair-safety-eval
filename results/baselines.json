@@ -1,0 +1,119 @@
+{
+  "A1": {
+    "original": {
+      "sec_warnings": [],
+      "misra": {
+        "15.5": 3
+      },
+      "loops": {}
+    },
+    "seeded": {
+      "sec_warnings": [],
+      "misra": {
+        "15.5": 3
+      },
+      "loops": {}
+    },
+    "upstream_fix_introduces_misra": {}
+  },
+  "A2": {
+    "original": {
+      "sec_warnings": [],
+      "misra": {
+        "15.5": 3
+      },
+      "loops": {}
+    },
+    "seeded": {
+      "sec_warnings": [],
+      "misra": {
+        "15.5": 3
+      },
+      "loops": {}
+    },
+    "upstream_fix_introduces_misra": {}
+  },
+  "A3": {
+    "original": {
+      "sec_warnings": [],
+      "misra": {
+        "14.2": 1,
+        "15.5": 14
+      },
+      "loops": {}
+    },
+    "seeded": {
+      "sec_warnings": [],
+      "misra": {
+        "14.2": 1,
+        "15.5": 15
+      },
+      "loops": {}
+    },
+    "upstream_fix_introduces_misra": {}
+  },
+  "A4": {
+    "original": {
+      "sec_warnings": [],
+      "misra": {},
+      "loops": {}
+    },
+    "seeded": {
+      "sec_warnings": [],
+      "misra": {},
+      "loops": {}
+    },
+    "upstream_fix_introduces_misra": {}
+  },
+  "A5": {
+    "original": {
+      "sec_warnings": [],
+      "misra": {
+        "15.5": 3
+      },
+      "loops": {}
+    },
+    "seeded": {
+      "sec_warnings": [],
+      "misra": {
+        "15.5": 1
+      },
+      "loops": {}
+    },
+    "upstream_fix_introduces_misra": {
+      "15.5": 2
+    }
+  },
+  "V1": {
+    "original": {
+      "sec_warnings": [],
+      "misra": {},
+      "loops": {}
+    },
+    "seeded": {
+      "sec_warnings": [],
+      "misra": {},
+      "loops": {}
+    },
+    "upstream_fix_introduces_misra": {}
+  },
+  "V2": {
+    "original": {
+      "sec_warnings": [],
+      "misra": {
+        "15.5": 2
+      },
+      "loops": {}
+    },
+    "seeded": {
+      "sec_warnings": [],
+      "misra": {
+        "15.5": 1
+      },
+      "loops": {}
+    },
+    "upstream_fix_introduces_misra": {
+      "15.5": 1
+    }
+  }
+}

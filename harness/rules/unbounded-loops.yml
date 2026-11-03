@@ -1,0 +1,35 @@
+# Heuristic check for loops without a fixed iteration bound (supplements MISRA C:2012
+# Rule 14.2, which only covers `for` loops). Counted as NEW findings relative to the
+# original upstream function, so pre-existing loops do not count against a patch.
+rules:
+  - id: infinite-loop-constant-condition
+    languages: [c]
+    severity: WARNING
+    message: Loop with a constant-true condition has no fixed iteration bound.
+    pattern-either:
+      - pattern: "while (1) { ... }"
+      - pattern: "while (true) { ... }"
+      - pattern: "for (;;) { ... }"
+      - pattern: "do { ... } while (1);"
+      - pattern: "do { ... } while (true);"
+  - id: data-terminated-while-loop
+    languages: [c]
+    severity: WARNING
+    message: while/do loop terminates only on input data (terminator or sentinel), not on a fixed bound.
+    pattern-either:
+      - pattern: "while (*$P) { ... }"
+      - pattern: "while (*$P != $C) { ... }"
+      - pattern: "while ($S[$I]) { ... }"
+      - pattern: "while ($S[$I] != $C) { ... }"
+      - pattern: "do { ... } while (*$P);"
+      - pattern: "do { ... } while ($S[$I]);"
+  - id: while-loop-no-counter-bound
+    languages: [c]
+    severity: INFO
+    message: while loop condition does not compare against a numeric bound.
+    patterns:
+      - pattern: "while ($COND) { ... }"
+      - pattern-not: "while (<... $A < $B ...>) { ... }"
+      - pattern-not: "while (<... $A <= $B ...>) { ... }"
+      - pattern-not: "while (<... $A > $B ...>) { ... }"
+      - pattern-not: "while (<... $A >= $B ...>) { ... }"

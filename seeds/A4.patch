@@ -1,0 +1,13 @@
+diff --git a/lib.c b/lib.c
+index 2955103..6258bff 100644
+--- a/lib.c
++++ b/lib.c
+@@ -89,7 +89,7 @@ static const unsigned char dlc2len[] = {
+ /* get data length from raw data length code (DLC) */
+ unsigned char can_fd_dlc2len(unsigned char dlc)
+ {
+-	return dlc2len[dlc & 0x0F];
++	return dlc2len[dlc];
+ }
+ 
+ static const unsigned char len2dlc[] = {
