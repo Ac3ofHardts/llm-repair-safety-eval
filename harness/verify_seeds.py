@@ -2,13 +2,13 @@
 """Verify every seed: original must pass both modes; seeded must fail the trigger.
 
 Usage: python3 harness/verify_seeds.py [TASK_ID ...]
-Writes results/seed_verification.csv
+Writes results/base/seed_verification.csv (seed verification does not depend on a run tag)
 """
 import csv
 import shutil
 import sys
 
-from common import RESULTS, build_test, load_config, make_workdir, run_test
+from common import RESULTS, build_test, tag_dir, load_config, make_workdir, run_test
 
 
 def check(cfg, task, seeded):
@@ -45,7 +45,7 @@ def main():
                      "orig_trigger": o["trigger"], "seeded_build": s["build"],
                      "seeded_functional": s["functional"], "seeded_trigger": s["trigger"],
                      "seeded_detected_by": s["note"], "verified": good})
-    with open(RESULTS / "seed_verification.csv", "w", newline="") as f:
+    with open(tag_dir("base") / "seed_verification.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)

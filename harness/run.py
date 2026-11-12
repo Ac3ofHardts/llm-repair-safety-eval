@@ -8,10 +8,10 @@ Example:
   python3 harness/run.py --tag t08 --temperature 0.8            # separate higher-temperature run
 
 Techniques: T1 plain review, T2 security-focused, T3 analyzer-guided, T4 security + MISRA-aware.
---tag keeps runs with different settings apart: records go to results/generations_<tag>.jsonl
-(the default tag "base" uses results/generations.jsonl).
+--tag keeps runs with different settings apart: records go to results/<tag>/generations.jsonl
+(the canonical run is tag "base": temperature 0.2).
 
-Each (model, task, technique, rep) is one record in results/generations.jsonl.
+Each (model, task, technique, rep) is one record in results/<tag>/generations.jsonl.
 Re-running skips records that already exist (safe to resume after a crash).
 """
 import argparse
@@ -122,6 +122,8 @@ def main():
     ap.add_argument("--tag", default="base", help="run label; non-base tags get their own files")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+    if args.tag.startswith("archive"):
+        sys.exit("results/archive/ is a frozen snapshot; use a new --tag")
     if args.out is None:
         args.out = str(gens_path(args.tag))
     bad = [t for t in args.techniques if t not in ("T1", "T2", "T3", "T4")]
