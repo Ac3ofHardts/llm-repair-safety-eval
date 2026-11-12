@@ -15,8 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 HARNESS = ROOT / "harness"
 REPOS = ROOT / "repos"
-SEEDS = ROOT / "seeds"
-TESTS = ROOT / "tests"
+BENCHMARK = ROOT / "benchmark"
+SEEDS = BENCHMARK / "seeds"
+TESTS = BENCHMARK / "tests"
 PROMPTS = ROOT / "prompts"
 RESULTS = ROOT / "results"
 
@@ -24,10 +25,37 @@ CC = os.environ.get("CC", "gcc")
 SAN_FLAGS = ["-g", "-O0", "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
              "-fno-omit-frame-pointer"]
 SAFETY_RULES = ["21.3", "17.2", "15.5", "14.2"]
+# Analyze one preprocessor configuration (the one the code is built with). Checking every
+# #ifdef combination made net_io.c take ~35 s per run instead of ~3 s.
+CPPCHECK_CFG = ["--max-configs=1"]
+
+
+def is_archive(tag):
+    return tag.startswith("archive")
+
+
+def tag_dir(tag="base"):
+    """Every run tag (settings combination) has its own self-contained results directory."""
+    d = RESULTS / tag
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def gens_path(tag="base"):
+    return tag_dir(tag) / "generations.jsonl"
+
+
+def results_path(tag="base"):
+    return tag_dir(tag) / "results.csv"
+
+
+def make_run_id(tag, model, task, technique, rep):
+    base = f"{model}__{task}__{technique}__r{rep}"
+    return base if tag == "base" else f"{tag}__{base}"
 
 
 def load_config():
-    with open(HARNESS / "tasks.json") as f:
+    with open(BENCHMARK / "tasks.json") as f:
         cfg = json.load(f)
     cfg["by_id"] = {t["id"]: t for t in cfg["tasks"]}
     return cfg
@@ -204,16 +232,29 @@ def build_context(cfg, task, wd):
 # --------------------------------------------------------------------------
 
 def include_flags(cfg, task, wd):
+    """-I flags: the work dir first (patched files win), then repo include dirs."""
+    rcfg = cfg["repos"][task["repo"]]
     flags = ["-I", str(wd)]
-    for d in cfg["repos"][task["repo"]].get("include_dirs", []):
+    for d in rcfg.get("include_dirs", []):
         flags += ["-I", str(wd / d)]
+    if rcfg.get("include_repo_dir"):
+        flags += ["-I", str(REPOS / task["repo"])]
     return flags
 
 
 def build_test(cfg, task, wd, out_bin):
+    rcfg = cfg["repos"][task["repo"]]
     src = TESTS / f"test_{task['id']}.c"
-    cmd = [CC, *SAN_FLAGS, *include_flags(cfg, task, wd), "-I", str(TESTS), str(src),
-           "-o", str(out_bin), "-lm"]
+    cmd = [CC, *SAN_FLAGS, *rcfg.get("cflags", []), *include_flags(cfg, task, wd),
+           "-I", str(TESTS), str(src), "-o", str(out_bin)]
+    if task.get("link"):
+        skip = set(task.get("exclude_objects", []))
+        objs = [str(REPOS / task["repo"] / o) for o in rcfg.get("link_objects", []) if o not in skip]
+        missing = [o for o in objs if not Path(o).exists()]
+        if missing:
+            return False, f"missing prebuilt objects (run ./setup.sh): {missing[:3]}"
+        cmd += objs + rcfg.get("link_libs", [])
+    cmd.append("-lm")
     rc, out, err = sh(cmd, timeout=180)
     return rc == 0, err
 
@@ -240,7 +281,7 @@ def _in_range(line, rng):
 def cppcheck_security(wd, filename, rng, incs=()):
     """cppcheck warnings (non-style) inside the function's line range."""
     tmpl = "{line}|{id}|{severity}|{message}"
-    rc, out, err = sh(["cppcheck", "--enable=warning,portability", "--inconclusive",
+    rc, out, err = sh(["cppcheck", "--enable=warning,portability", "--inconclusive", *CPPCHECK_CFG,
                        "--suppress=missingIncludeSystem", "--suppress=missingInclude",
                        "--quiet", f"--template={tmpl}", *incs, str(wd / filename)],
                       timeout=300)
@@ -305,7 +346,7 @@ def misra_violations(wd, filename, rng, incs=()):
     """
     target = wd / filename
     dump = Path(str(target) + ".dump")
-    sh(["cppcheck", "--dump", "--quiet", "--suppress=missingIncludeSystem",
+    sh(["cppcheck", "--dump", "--quiet", *CPPCHECK_CFG, "--suppress=missingIncludeSystem",
         "--suppress=missingInclude", *incs, str(target)], timeout=600)
     c = Counter()
     if not dump.exists():

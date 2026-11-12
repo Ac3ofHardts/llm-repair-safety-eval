@@ -1,0 +1,70 @@
+diff --git a/net_io.c b/net_io.c
+index 8abd510..08a7530 100644
+--- a/net_io.c
++++ b/net_io.c
+@@ -1409,50 +1409,26 @@ static int decodeHexMessage(struct client *c, char *hex) {
+     // and some AVR records that we can understand
+     if (hex[l-1] != ';') {return (0);} // not complete - abort
+ 
+-    switch (hex[0]) {
+-        case '<':
+-            // [0]       '<'
+-            // [1..12]   timestamp
+-            // [13..14]  signal level
+-            // [15..l-2] data
+-            // [l-1]     ';'
+-            if (l < 18)
+-                return 0; // truncated
+-            if (!timestampFromHex(hex + 1, &mm.timestampMsg))
+-                return 0; // malformed timestamp
+-            if (!signalFromHex(hex + 13, &mm.signalLevel))
+-                return 0; // malformed signal level
+-            hex += 15;
+-            l -= 16;
+-            break;
++    switch(hex[0]) {
++        case '<': {
++            mm.signalLevel = ((hexDigitVal(hex[13])<<4) | hexDigitVal(hex[14])) / 255.0;
++            mm.signalLevel = mm.signalLevel * mm.signalLevel;
++            hex += 15; l -= 16; // Skip <, timestamp and siglevel, and ;
++            break;}
+ 
+         case '@':     // No CRC check
+-        case '%':     // CRC is OK
+-            // [0]       '@' or '%'
+-            // [1..12]   timestamp
+-            // [13..l-2] data
+-            // [l-1]     ';'
+-            if (l < 16)
+-                return 0; // truncated
+-            if (!timestampFromHex(hex + 1, &mm.timestampMsg))
+-                return 0; // malformed timestamp
+-            hex += 13;
+-            l -= 14;
+-            break;
++        case '%': {   // CRC is OK
++            hex += 13; l -= 14; // Skip @,%, and timestamp, and ;
++            break;}
+ 
+         case '*':
+-        case ':':
+-            // [0]       '*' or ':'
+-            // [1..l-2]  data
+-            // [l-1]     ';'
+-            if (l < 4)
+-                return 0; // truncated
+-            hex++;
+-            l -= 2;
+-            break;
++        case ':': {
++            hex++; l-=2; // Skip * and ;
++            break;}
+ 
+-        default:
+-            return 0;
++        default: {
++            return (0); // We don't know what this is, so abort
++            break;}
+     }
+ 
+     if ( (l != (MODEAC_MSG_BYTES      * 2))

@@ -1,3 +1,49 @@
+# --- Upstream subject repos (recreated by ./setup.sh at the pinned commits) ---
 repos/
-results/patches/
+
+# --- Python ---
 __pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# --- Build / analysis byproducts (normally in temp dirs, but just in case) ---
+*.o
+*.a
+*.so
+a.out
+test_bin
+*.dump
+*.ctu-info
+*.plist
+
+# --- Run logs (results/ itself IS committed) ---
+run.log
+eval.log
+nohup.out
+*.log
+
+# --- LaTeX build files (if the paper lives in this repo) ---
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.nav
+*.snm
+*.xdv
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+.obsidian/

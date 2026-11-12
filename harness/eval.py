@@ -4,23 +4,26 @@
 Usage:
   python3 harness/eval.py                 # evaluate everything not yet in results.csv
   python3 harness/eval.py --baseline-only # just print per-task baselines (original vs seeded)
+  python3 harness/eval.py --tag t08       # evaluate results/t08/generations.jsonl -> results/t08/results.csv
 
-Writes results/results.csv (one row per generation), results/baselines.json,
-and the patched function for each run in results/patches/<run_id>.c
+Writes, under results/<tag>/: results.csv (one row per generation), baselines.json,
+and the patched function for each run in patches/<run_id>.c
 """
 import argparse
 import csv
 import difflib
+import hashlib
 import json
 import shutil
 from concurrent.futures import ProcessPoolExecutor
 from collections import Counter
 
-from common import (RESULTS, SAFETY_RULES, build_test, extract_function, function_line_range,
+from common import (RESULTS, SAFETY_RULES, build_test, gens_path, is_archive, results_path, tag_dir, extract_function, function_line_range,
                     include_flags, load_config, make_workdir, misra_violations, normalize_c,
                     run_test, security_warnings, semgrep_loops, splice_function, warning_keys)
 
-FIELDS = ["run_id", "model", "task", "technique", "rep", "domain", "cwe", "seed_type",
+FIELDS = ["run_id", "tag", "temperature", "model", "task", "technique", "rep", "domain",
+          "representation", "cwe", "seed_type", "patch_hash",
           "n_calls", "extracted", "build_ok", "functional_pass", "trigger_pass",
           "trigger_sanitizer", "sec_warnings", "new_sec_warnings", "cwe_fixed",
           *[f"misra_{r.replace('.', '_')}_new" for r in SAFETY_RULES], "loops_new",
@@ -57,10 +60,12 @@ def new_count(after: Counter, before: Counter):
     return sum((after - before).values())
 
 
-def evaluate(cfg, rec, base):
+def evaluate(cfg, rec, base, patch_dir):
     task = cfg["by_id"][rec["task"]]
     row = {k: "" for k in FIELDS}
-    row.update(run_id=rec["run_id"], model=rec["model"], task=task["id"],
+    row.update(run_id=rec["run_id"], tag=rec.get("tag", "base"),
+               temperature=rec.get("temperature", rec.get("options", {}).get("temperature", "")),
+               model=rec["model"], task=task["id"], representation=task.get("representation", ""),
                technique=rec["technique"], rep=rec["rep"], domain=task["domain"],
                cwe=task["cwe"], seed_type=task["seed_type"], n_calls=len(rec.get("calls", [])),
                error=rec.get("error") or "")
@@ -68,13 +73,15 @@ def evaluate(cfg, rec, base):
     row["gen_seconds"] = round(sum((c.get("wall_seconds") or 0) for c in rec.get("calls", [])), 1)
     fn = rec.get("final_function")
     row["extracted"] = fn is not None
+    if fn is not None:
+        row["patch_hash"] = hashlib.sha1(normalize_c(fn).encode()).hexdigest()[:12]
     if fn is None:
         for k in ("build_ok", "functional_pass", "trigger_pass", "cwe_fixed", "joint_success"):
             row[k] = False
         return row
 
-    (RESULTS / "patches").mkdir(exist_ok=True)
-    (RESULTS / "patches" / f"{rec['run_id'].replace(':', '_')}.c").write_text(fn + "\n")
+    patch_dir.mkdir(exist_ok=True)
+    (patch_dir / f"{rec['run_id'].replace(':', '_')}.c").write_text(fn + "\n")
 
     orig = base["original"]   # upstream function: used only for the contamination signal
     pre = base["seeded"]      # pre-patch function the model was given: baseline for "new" counts
@@ -128,13 +135,46 @@ def evaluate(cfg, rec, base):
     return row
 
 
+def migrate(rows, out, gens, cfg):
+    """Rewrite a results file from an older harness version with the current columns."""
+    funcs = {}
+    try:
+        with open(gens) as f:
+            for l in f:
+                if l.strip():
+                    r = json.loads(l)
+                    funcs[r["run_id"]] = (r.get("final_function"), r.get("tag", "base"),
+                                          r.get("options", {}).get("temperature", ""))
+    except FileNotFoundError:
+        pass
+    for r in rows:
+        fn, tag, temp = funcs.get(r["run_id"], (None, "base", ""))
+        task = cfg["by_id"].get(r["task"], {})
+        r.setdefault("tag", tag)
+        r["tag"] = r["tag"] or tag
+        r["temperature"] = r.get("temperature") or temp
+        r["representation"] = r.get("representation") or task.get("representation", "")
+        if not r.get("patch_hash") and fn:
+            r["patch_hash"] = hashlib.sha1(normalize_c(fn).encode()).hexdigest()[:12]
+    with open(out, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore", restval="")
+        w.writeheader()
+        w.writerows(rows)
+    print(f"Migrated {len(rows)} existing rows in {out} to the current column layout")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--gens", default=str(RESULTS / "generations.jsonl"))
-    ap.add_argument("--out", default=str(RESULTS / "results.csv"))
+    ap.add_argument("--tag", default="base")
+    ap.add_argument("--gens", default=None)
+    ap.add_argument("--out", default=None)
     ap.add_argument("--baseline-only", action="store_true")
     ap.add_argument("--jobs", type=int, default=4, help="parallel evaluations (CPU-bound)")
     args = ap.parse_args()
+    if is_archive(args.tag):
+        raise SystemExit("results/archive/ is a frozen snapshot; evaluate into a new tag instead")
+    args.gens = args.gens or str(gens_path(args.tag))
+    args.out = args.out or str(results_path(args.tag))
     cfg = load_config()
 
     print("Computing baselines (original vs seeded) ...")
@@ -142,7 +182,6 @@ def main():
     summary = {tid: {k: {"sec_warnings": [f"{w['tool']}:{w['rule']} L{w['line']}" for w in v["sec"]],
                          "misra": dict(v["misra"]), "loops": dict(v["loops"])}
                      for k, v in prof.items()} for tid, prof in base.items()}
-    (RESULTS / "baselines.json").write_text(json.dumps(summary, indent=2))
     for tid, prof in base.items():
         up_new = {r: prof["original"]["misra"].get(r, 0) - prof["seeded"]["misra"].get(r, 0)
                   for r in SAFETY_RULES}
@@ -151,14 +190,19 @@ def main():
         print(f"  {tid}: sec warnings seeded={len(prof['seeded']['sec'])} "
               f"original={len(prof['original']['sec'])}; MISRA seeded={dict(prof['seeded']['misra'])} "
               f"original={dict(prof['original']['misra'])}; upstream fix introduces {up_new or 'none'}")
-    (RESULTS / "baselines.json").write_text(json.dumps(summary, indent=2))
+    (tag_dir(args.tag) / "baselines.json").write_text(json.dumps(summary, indent=2))
     if args.baseline_only:
         return
 
     done = set()
     try:
         with open(args.out) as f:
-            done = {r["run_id"] for r in csv.DictReader(f)}
+            rd = csv.DictReader(f)
+            old_rows = list(rd)
+            old_fields = rd.fieldnames or []
+        done = {r["run_id"] for r in old_rows}
+        if old_fields != FIELDS:
+            migrate(old_rows, args.out, args.gens, cfg)
     except FileNotFoundError:
         pass
     recs = []
@@ -173,7 +217,8 @@ def main():
         if new_file:
             w.writeheader()
         with ProcessPoolExecutor(max_workers=args.jobs) as pool:
-            futs = [pool.submit(evaluate, cfg, rec, base[rec["task"]]) for rec in todo]
+            futs = [pool.submit(evaluate, cfg, rec, base[rec["task"]],
+                                 tag_dir(args.tag) / "patches") for rec in todo]
             rows = (fut.result() for fut in futs)
             for k, (rec, row) in enumerate(zip(todo, rows), 1):
                 w.writerow(row)

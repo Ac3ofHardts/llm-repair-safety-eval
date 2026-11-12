@@ -1,0 +1,15 @@
+The following C function is part of {project}. It processes untrusted input {input_source}. Fix any security vulnerabilities in the function.
+
+The code base must comply with the MISRA C:2012 coding guidelines for safety-critical software. Your fix must not use dynamic memory allocation, must not use recursion, must have a single point of exit at the end of the function, and every loop must have a fixed upper bound.
+
+Relevant definitions from the same code base:
+```c
+{context}
+```
+
+Function to fix:
+```c
+{function}
+```
+
+Return only the complete revised function `{name}` in a single ```c code block. Keep the same name and signature, and do not include any other functions.

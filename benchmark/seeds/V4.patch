@@ -1,0 +1,16 @@
+diff --git a/net_io.c b/net_io.c
+index 8abd510..9e691da 100644
+--- a/net_io.c
++++ b/net_io.c
+@@ -1455,11 +1455,6 @@ static int decodeHexMessage(struct client *c, char *hex) {
+             return 0;
+     }
+ 
+-    if ( (l != (MODEAC_MSG_BYTES      * 2))
+-      && (l != (MODES_SHORT_MSG_BYTES * 2))
+-      && (l != (MODES_LONG_MSG_BYTES  * 2)) )
+-        {return (0);} // Too short or long message... broken
+-
+     if ( (0 == Modes.mode_ac)
+       && (l == (MODEAC_MSG_BYTES * 2)) )
+         {return (0);} // Right length for ModeA/C, but not enabled

@@ -4,8 +4,14 @@
 Example:
   python3 harness/run.py --models qwen2.5-coder:32b codestral:22b --reps 5
   python3 harness/run.py --models qwen2.5-coder:32b --tasks A1 --techniques T1 --reps 1   # smoke test
+  python3 harness/run.py --techniques T4                        # safety-aware prompt
+  python3 harness/run.py --tag t08 --temperature 0.8            # separate higher-temperature run
 
-Each (model, task, technique, rep) is one record in results/generations.jsonl.
+Techniques: T1 plain review, T2 security-focused, T3 analyzer-guided, T4 security + MISRA-aware.
+--tag keeps runs with different settings apart: records go to results/<tag>/generations.jsonl
+(the canonical run is tag "base": temperature 0.2).
+
+Each (model, task, technique, rep) is one record in results/<tag>/generations.jsonl.
 Re-running skips records that already exist (safe to resume after a crash).
 """
 import argparse
@@ -16,7 +22,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 
-from common import (PROMPTS, RESULTS, build_context, extract_code_from_response,
+from common import (PROMPTS, RESULTS, gens_path, make_run_id, build_context, extract_code_from_response,
                     extract_function, format_warnings, function_line_range, include_flags,
                     load_config, make_workdir, security_warnings, splice_function)
 
@@ -113,12 +119,20 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.2)
     ap.add_argument("--num-ctx", type=int, default=16384)
     ap.add_argument("--num-predict", type=int, default=2048)
-    ap.add_argument("--out", default=str(RESULTS / "generations.jsonl"))
+    ap.add_argument("--tag", default="base", help="run label; non-base tags get their own files")
+    ap.add_argument("--out", default=None)
     args = ap.parse_args()
+    if args.tag.startswith("archive"):
+        sys.exit("results/archive/ is a frozen snapshot; use a new --tag")
+    if args.out is None:
+        args.out = str(gens_path(args.tag))
+    bad = [t for t in args.techniques if t not in ("T1", "T2", "T3", "T4")]
+    if bad:
+        sys.exit(f"unknown technique(s): {bad}")
 
     cfg = load_config()
     task_ids = args.tasks or [t["id"] for t in cfg["tasks"]]
-    templates = {t: (PROMPTS / f"{t}.txt").read_text() for t in ("T1", "T2", "T3")}
+    templates = {t: (PROMPTS / f"{t}.txt").read_text() for t in ("T1", "T2", "T3", "T4")}
     system = (PROMPTS / "system.txt").read_text().strip()
     digests = model_digests(args.host)
     for m in args.models:
@@ -135,19 +149,20 @@ def main():
 
     jobs = [(m, t, tech, r) for m in args.models for t in task_ids
             for tech in args.techniques for r in range(1, args.reps + 1)]
-    todo = [j for j in jobs if f"{j[0]}__{j[1]}__{j[2]}__r{j[3]}" not in done]
+    todo = [j for j in jobs if make_run_id(args.tag, *j) not in done]
     print(f"{len(jobs)} jobs, {len(jobs) - len(todo)} already done, {len(todo)} to run")
 
     with open(args.out, "a") as out:
         for k, (model, tid, tech, rep) in enumerate(todo, 1):
-            run_id = f"{model}__{tid}__{tech}__r{rep}"
+            run_id = make_run_id(args.tag, model, tid, tech, rep)
             t0 = time.time()
             try:
                 res = generate_one(cfg, cfg["by_id"][tid], tech, model, rep, args, templates, system)
                 err = None
             except Exception as e:  # noqa: BLE001  keep going; record the failure
                 res, err = {"calls": [], "final_function": None}, repr(e)
-            rec = {"run_id": run_id, "model": model, "model_digest": digests.get(model, ""),
+            rec = {"run_id": run_id, "tag": args.tag, "temperature": args.temperature,
+                   "model": model, "model_digest": digests.get(model, ""),
                    "task": tid, "technique": tech, "rep": rep, "error": err,
                    "timestamp": datetime.now(timezone.utc).isoformat(), **res}
             out.write(json.dumps(rec) + "\n")
