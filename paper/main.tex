@@ -17,8 +17,12 @@
 \lstset{basicstyle=\scriptsize\ttfamily, breaklines=true, breakatwhitespace=true,
         columns=fullflexible, frame=tb, showstringspaces=false}
 
+% Generated numbers: \stat{key} (base run, temperature 0.2) and \stat{t08-key} (temperature 0.8).
+% Regenerate with `make tables`. A missing key prints as a red ?key?.
+\input{tables/macros}
 
-\input{tables/macros}  % generated numbers: \stat{key}
+% Draft notes. Remove every \todo before submission (grep -n todo main.tex).
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 
 \begin{document}
 
@@ -32,7 +36,7 @@
 
 % =====================================================================
 \begin{abstract}
-Large language models (LLMs) are increasingly used to repair security weaknesses in source code, including firmware for safety-critical transportation systems. Recent work argues that secure code generation must be evaluated on both security and functionality. Embedded transportation software adds a third requirement that functional tests do not capture: compliance with safety coding standards such as MISRA~C, which restrict constructs like dynamic allocation, recursion, unbounded loops, and multiple exit points. We study whether LLM-assisted security repair preserves this compliance, and whether the security/safety tradeoff is consistent across text-based automotive CAN parsing (\texttt{can-utils}) and binary avionics ADS-B decoding (\texttt{dump1090}). We seeded seven weaknesses (five synthetic, two reconstructed from real upstream fixes), verified each with sanitizer-backed triggering inputs, and generated 210 patches with two locally hosted open-weight models under three techniques: plain review prompting, security-focused prompting, and static-analysis-guided repair. 56\% of patches removed the seeded weakness, but 38\% of those fixes introduced a new MISRA violation, every one of them Rule~15.5 (single point of exit). The security-focused prompt did not fix more weaknesses than plain prompting (38/70 versus 36/70) but nearly doubled the rate of introduced safety violations (30/70 versus 16/70). Security tools and the safety checker disagreed on 38\% of patches, almost always with the security tools accepting a patch the safety checker rejected, and the security tools flagged none of the seeded weaknesses. Weaknesses reconstructed from real fixes were repaired far less often than synthetic ones (10\% versus 74\%). Domain differences appear but are confounded with the two avionics tasks.
+Large language models (LLMs) are increasingly used to repair security weaknesses in source code, including firmware for safety-critical transportation systems. Such code must also comply with safety coding standards such as MISRA~C, which functional tests do not check. We study whether LLM security repair preserves this compliance, whether stating the safety requirement in the prompt helps, and whether the answer depends on the domain or the representation of the input being processed. We built a benchmark of \stat{tasks} sanitizer-verified seeded weaknesses in an automotive CAN library (\texttt{can-utils}) and an avionics ADS-B decoder (\texttt{dump1090}), three of them reconstructed from real upstream security fixes, and generated \stat{patches} patches with two locally hosted open-weight models under four prompting techniques, repeating the experiment at a second sampling temperature. Of the \stat{fixed} patches that removed the weakness, \stat{fixed-unsafe-pct}\% introduced a new MISRA violation, almost all of them breaking Rule~15.5 (single point of exit); \stat{upstream-fixes-violating} of the \stat{tasks} human-written upstream fixes do the same. Asking for a security fix rather than a plain review did not increase the fix rate but roughly doubled introduced violations. Stating the MISRA requirements reduced violations, consistently for one model, but did not increase the number of patches that were secure, functional, and compliant at once. The static security analyzers reported no warning specific to any seeded weakness, and they and the safety checker disagreed on \stat{disagree-pct}\% of patches, almost always in the same direction. Weaknesses reconstructed from real fixes were repaired far less often than synthetic ones (\stat{historical-fixed-pct}\% versus \stat{synthetic-fixed-pct}\%). Fix rates differed sharply by domain and representation, but these differences track individual functions rather than either factor.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -43,42 +47,42 @@ large language models, secure code generation, automated program repair, MISRA~C
 \section{Introduction}
 \IEEEPARstart{L}{arge} language models are now a routine part of software development, and their use is spreading into embedded and safety-critical domains. Developers use code assistants to write new functions, explain unfamiliar code, and increasingly to repair security defects. At the same time, a growing body of work shows that LLM-generated code frequently contains security weaknesses~\cite{pearce2022asleep, khoury2023chatgpt, tihanyi2023formai}, and that developers who rely on AI assistants may produce less secure code while believing it to be more secure~\cite{perry2023users}. In response, researchers have proposed techniques to make generated code more secure, including security-focused prompting, controlled generation~\cite{he2023sven}, LLM-driven vulnerability repair~\cite{pearce2023zeroshot}, and analyzer feedback loops~\cite{yan2025guiding}. LLM-assisted security fixes are already reaching real embedded code: one of the upstream commits to the \texttt{can-utils} library we study, a bounds check on an error-frame formatter (commit \texttt{411a686}, October 2026), is marked as assisted by an LLM.
 
-Evaluating these techniques is harder than it looks. Dai et al.~\cite{rethinking2026} show that a technique can lower the number of reported security warnings while damaging the program: it may delete the vulnerable code path, return early without doing the required work, or replace the original logic with code that no longer solves the task. They argue that security and functionality must be evaluated together on the same generated programs, and outcome-driven benchmarks such as CWEval~\cite{peng2025cweval} take the same position.
+Evaluating these techniques is harder than it looks. Dai et al.~\cite{rethinking2026} show that a technique can lower the number of reported security warnings while damaging the program, and argue that security and functionality must be evaluated together on the same generated programs; outcome-driven benchmarks such as CWEval~\cite{peng2025cweval} take the same position.
 
-We argue that, for embedded transportation software, two axes are still not enough. Automotive and avionics firmware is commonly written against safety coding standards such as MISRA~C~\cite{misra2012}, and avionics software is developed under certification processes such as DO-178C~\cite{do178c}. These standards restrict constructs that make code hard to analyze or bound: heap allocation, recursion, unbounded loops, and multiple exit points. The idioms an LLM reaches for when ``making code safe'' in a general-purpose sense, such as adding an early \texttt{return} for each invalid input or allocating a right-sized buffer, are exactly the constructs these standards discourage. A patch that removes a buffer overflow and passes every functional test can still be unacceptable in a vehicle or an aircraft, yet a security-plus-functionality evaluation would score it as a success.
+For embedded transportation software, two axes are not enough. Automotive and avionics firmware is commonly written against safety coding standards such as MISRA~C~\cite{misra2012}, and avionics software is developed under certification processes such as DO-178C~\cite{do178c}. These standards restrict constructs that make code hard to analyze or bound: heap allocation, recursion, unbounded loops, and multiple exit points. The idioms a programmer reaches for when ``making code safe'' in a general-purpose sense, such as returning early on invalid input, are exactly the constructs these standards discourage. A patch that removes a buffer overflow and passes every functional test can therefore still be unacceptable in a vehicle or an aircraft.
 
-A second question is whether this tradeoff is a property of the technique or of the code it is applied to. Automotive tooling built around SocketCAN parses human-readable ASCII representations of CAN frames, while avionics receivers such as ADS-B decoders operate on binary messages with bit-level field extraction and arithmetic-heavy position decoding. These representations expose different weakness classes and may draw out different repair behaviors.
+This paper reports an empirical study of that tradeoff. We seed \stat{tasks} weaknesses into real functions from \texttt{can-utils}~\cite{canutils} and \texttt{dump1090}~\cite{dump1090}, repair them with two locally hosted models under four prompting techniques, and evaluate every patch for security, safety-rule compliance, and functional correctness.
 
-This paper reports the design of an empirical study that addresses both questions, and the results of its full 210-patch experiment. We seed seven weaknesses into \texttt{can-utils}~\cite{canutils} and \texttt{dump1090}~\cite{dump1090}, repair them with two locally hosted models under three techniques, and evaluate every patch for security, safety-rule compliance, and functional correctness.
-
-The contributions of this work are:
+Our contributions are:
 \begin{itemize}
-    \item A three-axis evaluation (security, safety, functionality) of LLM-assisted security repair for embedded C, extending the dual-axis evaluation of Dai et al.~\cite{rethinking2026}.
-    \item A small, reproducible benchmark of seven sanitizer-verified seeded weaknesses in real automotive and avionics code, including one reconstructed from a fix made after the models' training data was collected.
-    \item A measurement of how often security scanners and safety-rule checkers disagree about the same patch.
-    \item A cross-domain comparison of the security/safety tradeoff between text-based and binary protocol code.
+    \item A three-axis evaluation (security, safety, functionality) of LLM security repair for embedded C, extending the dual-axis evaluation of Dai et al.~\cite{rethinking2026}.
+    \item A reproducible benchmark of \stat{tasks} sanitizer-verified seeded weaknesses in automotive and avionics code, balanced across domain and input representation, including three weaknesses reconstructed from real upstream security fixes.
+    \item Evidence that the conflict between security repair and MISRA's single-exit rule is systematic: it appears across models, techniques, sampling temperatures, and in half of the human-written upstream fixes.
+    \item A measurement of whether stating the safety requirement in the prompt resolves the conflict, and at what cost.
+    \item A methodological finding for benchmark design: weaknesses reconstructed from real fixes are far harder to repair than synthetic seeds that delete a single check.
 \end{itemize}
 
 % =====================================================================
 \section{Problem Statement}
 LLM-driven security repair can remove a CWE from embedded C code while introducing violations of safety-critical coding constraints, such as dynamic memory allocation, recursion, unbounded loops, or multiple function exit points. Current evaluation practice for secure code generation checks whether a patch removes the weakness and whether it still passes functional tests~\cite{rethinking2026, peng2025cweval}, but neither check detects safety-rule regressions. A technique that looks effective under existing benchmarks may therefore produce code that cannot be deployed in a safety-critical system.
 
-This risk may also depend on the protocol representation being processed. ASCII-text parsing, as in CAN frame parsing in \texttt{can-utils}, and binary bit-level decoding, as in ADS-B position decoding in \texttt{dump1090}, present different CWE surfaces and may lead to different LLM failure modes. If the tradeoff varies by domain, conclusions drawn from one kind of embedded code will not transfer to another.
+This risk may also depend on the protocol representation being processed. ASCII-text parsing, as in CAN frame parsing in \texttt{can-utils}, and binary bit-level decoding, as in ADS-B position decoding in \texttt{dump1090}, present different CWE surfaces and may lead to different LLM failure modes. If the tradeoff varies by domain or representation, conclusions drawn from one kind of embedded code will not transfer to another.
 
 The problem matters for practice because LLM-based repair is being adopted faster than the evaluation methods that would tell practitioners whether its output is acceptable in regulated domains. It matters for research because it identifies a dimension, safety-standard compliance, that is missing from current secure-code-generation benchmarks.
 
+
 % =====================================================================
 \section{Research Questions}
-The research questions are unchanged from Milestone~1. The results (Section~\ref{sec:results}) answer RQ1 and RQ2; RQ3 needs more avionics tasks before it can be answered (Section~\ref{sec:remaining}).
 
 \textbf{RQ1: Does an LLM-generated security fix for a CWE in embedded C preserve compliance with safety coding rules?}
-For each seeded weakness and technique, we measure whether the patch removes the weakness and whether it introduces new violations of a fixed MISRA~C:2012 rule subset relative to the pre-patch code.
+We measure how often a patch that removes the weakness also introduces a violation of a fixed MISRA~C:2012 rule subset, and how this depends on the prompting technique.
+\emph{RQ1a: Does stating the safety requirement in the prompt prevent the violations, and at what cost to the fix rate?}
 
 \textbf{RQ2: Do security scanners and safety-rule checkers disagree about the same patched code?}
-We measure how often a patch is judged acceptable by the security tools but not by the safety checker, and the reverse, and characterize the kinds of code changes that produce disagreement.
+We measure how often the security tools accept a patch that the safety checker rejects, and the reverse.
 
-\textbf{RQ3: Does the security/safety tradeoff generalize across protocol domains?}
-We compute the RQ1 and RQ2 metrics separately for the text-based automotive tasks and the binary avionics tasks and compare them.
+\textbf{RQ3: Does the security/safety tradeoff depend on the protocol domain or on the input representation?}
+We compare automotive and avionics tasks while holding the representation fixed (text parsing), and text and binary tasks while holding the domain fixed (avionics).
 
 % =====================================================================
 \section{Related Work}
@@ -101,185 +105,178 @@ Lipp et al.~\cite{lipp2022static} evaluated several static C analyzers against r
 \subsection{Transportation Protocol Security}
 Koscher et al.~\cite{koscher2010experimental} demonstrated that an attacker with access to a vehicle's CAN bus could control safety-critical functions, because the bus provides no authentication. Strohmeier et al.~\cite{strohmeier2015adsb} surveyed the security of ADS-B, which broadcasts unauthenticated position reports that any receiver can decode and any transmitter can spoof. In both domains, the code that parses and decodes untrusted input sits directly on the attack surface.
 
+
 % =====================================================================
 \section{Methodology}
 \label{sec:method}
-This is a controlled experiment with three independent variables (repair technique, model, and protocol domain), plus seed type (synthetic or historical) as a secondary factor. Each generated patch is measured on security, safety, and functionality by one shared harness. Fig.~\ref{fig:pipeline} summarizes the pipeline.
+This is a controlled experiment. The factors are the prompting technique (four levels), the model (two), the protocol domain (automotive, avionics), the input representation (text parsing, binary decoding), and the seed type (synthetic, historical). Every task, technique, and model combination is repeated five times, at each of two sampling temperatures. Each patch is measured on security, safety, and functionality by one shared harness (Fig.~\ref{fig:pipeline}).
 
 \input{figures/pipeline}
 
 \subsection{Subject Codebases}
 \begin{itemize}
     \item \textbf{Automotive:} \texttt{linux-can/can-utils}~\cite{canutils}, file \texttt{lib.c}, which parses and formats CAN, CAN~FD, and CAN~XL frames for the SocketCAN userspace tools. Pinned to \texttt{master} at commit \texttt{834ceef} (2026-10-14).
-    \item \textbf{Avionics:} \texttt{flightaware/dump1090}~\cite{dump1090}, file \texttt{cpr.c}, which decodes Compact Position Reporting (CPR) fields from airborne and surface ADS-B position messages. Pinned to release v11.1, commit \texttt{0339a57} (2026-07-01).
+    \item \textbf{Avionics:} \texttt{flightaware/dump1090}~\cite{dump1090}, files \texttt{cpr.c} (Compact Position Reporting decoding), \texttt{net\_io.c} (the AVR network input parser), and \texttt{mode\_ac.c} (Mode~A/C altitude tables). Pinned to release v11.1, commit \texttt{0339a57} (2026-07-01).
 \end{itemize}
-Both files process untrusted input, are written in C, and can be built and tested in isolation. \texttt{lib.c} represents text parsing; \texttt{cpr.c} represents bit-field and arithmetic decoding of binary messages.
 
-\subsection{Seeded Tasks}
-We selected functions that meet four criteria: (1) they parse or decode input that an attacker can control (CAN frame strings, error frames, or over-the-air ADS-B position fields); (2) they can be compiled and exercised in isolation with a small test driver; (3) they contain an existing defensive check, or have a documented upstream security fix, from which a single weakness can be seeded; and (4) the seeded weakness can be confirmed by a sanitizer fault or a test assertion. We searched each repository's commit history for bounds, length, and overflow fixes to find candidates for historical seeds; two met all four criteria.
+\subsection{Task Selection and Seeding}
+We selected functions that meet four criteria: (1) they parse or decode input that an attacker can control; (2) they can be compiled and exercised in isolation with a small test driver; (3) they contain an existing defensive check, or have a documented upstream security fix, from which a single weakness can be seeded; and (4) the seeded weakness can be confirmed by a sanitizer fault or a test assertion. We searched both repositories' commit histories for bounds, length, and overflow fixes to find historical seeds; three met all four criteria.
 
-Each task is a vulnerable variant of one real function, produced by a single patch against the pinned commit (Table~\ref{tab:tasks}). \emph{Synthetic} seeds remove or weaken one existing defensive check. \emph{Historical} seeds restore the vulnerable logic that a real upstream commit fixed. A3 reverse-applies only the relevant hunk of upstream commit \texttt{cbbad5e} (2026-09-20), which added length checks before \texttt{parse\_canframe} reads its delimiter characters; this fix was published after the training data of both models was collected, so the models cannot have memorized it. A5 reconstructs, on current code, the unchecked \texttt{snprintf} offset arithmetic fixed by upstream commit \texttt{ef853f5} (2022); the literal reverse patch no longer applies.
+Each task is a vulnerable variant of one real function, produced by a single patch against the pinned commit (Table~\ref{tab:tasks}). \emph{Synthetic} seeds remove or weaken one existing defensive check. \emph{Historical} seeds restore the vulnerable logic that a real upstream commit fixed: A3 reverse-applies the relevant hunk of \texttt{cbbad5e} (2026-09-20), published after both models' training data was collected; A5 and V3 rebuild, on current code, the pre-fix logic of \texttt{ef853f5} (2022) and \texttt{65cd5fe} (2021). Each task is also classified by the representation of the input it processes: \emph{text} (ASCII or hex-encoded strings) or \emph{binary} (bit fields, table indices, and arithmetic on decoded values). This yields a design in which domain and representation are partly crossed: automotive text (A1, A2, A3, A5), automotive binary (A4), avionics text (V3, V4), and avionics binary (V1, V2, V5).
 
 \begin{table*}[t]
     \centering
     \caption{Seeded tasks. Every seed was verified: the original function passes its functional and trigger tests, and the seeded function fails its trigger test.}
     \label{tab:tasks}
-    \resizebox{\linewidth}{!}{%
-\begin{tabular}{|c|l|p{4.6cm}|l|l|l|}
+    \footnotesize
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{|c|l|p{4.4cm}|c|l|l|l|}
         \hline
-        \textbf{ID} & \textbf{Function} & \textbf{Seeded weakness} & \textbf{CWE} & \textbf{Seed type} & \textbf{Trigger detected by} \\
+        \textbf{ID} & \textbf{Function} & \textbf{Seeded weakness} & \textbf{CWE} & \textbf{Seed type} & \textbf{Repr.} & \textbf{Trigger detected by} \\
         \hline
-        A1 & \texttt{hexstring2data} & upper length bound removed & 787 & synthetic & ASan heap overflow \\
-        A2 & \texttt{hexstring2data} & odd-length check removed & 20 & synthetic & test assertion \\
-        A3 & \texttt{parse\_canframe} & delimiter reads without length checks & 125 & historical (\texttt{cbbad5e}) & ASan heap over-read \\
-        A4 & \texttt{can\_fd\_dlc2len} & 4-bit index mask removed & 125 & synthetic & ASan global over-read \\
-        A5 & \texttt{snprintf\_error\_data} & \texttt{snprintf} truncation unchecked & 787 & historical (\texttt{ef853f5}) & ASan heap overflow \\
+        A1 & \texttt{hexstring2data} & upper length bound removed & 787 & synthetic & text & ASan heap overflow \\
+        A2 & \texttt{hexstring2data} & odd-length check removed & 20 & synthetic & text & test assertion \\
+        A3 & \texttt{parse\_canframe} & delimiter reads without length checks & 125 & historical (\texttt{cbbad5e}) & text & ASan heap over-read \\
+        A4 & \texttt{can\_fd\_dlc2len} & 4-bit index mask removed & 125 & synthetic & binary & ASan global over-read \\
+        A5 & \texttt{snprintf\_error\_data} & \texttt{snprintf} truncation unchecked & 787 & historical (\texttt{ef853f5}) & text & ASan heap overflow \\
         \hline
-        V1 & \texttt{cprNFunction} & lower clamp on zone count removed & 369 & synthetic & UBSan divide by zero \\
-        V2 & \texttt{decodeCPRairborne} & latitude range check removed & 20 & synthetic & test assertion \\
+        V1 & \texttt{cprNFunction} & lower clamp on zone count removed & 369 & synthetic & binary & UBSan divide by zero \\
+        V2 & \texttt{decodeCPRairborne} & latitude range check removed & 20 & synthetic & binary & test assertion \\
+        V3 & \texttt{decodeHexMessage} & AVR header read without length checks & 125 & historical (\texttt{65cd5fe}) & text & ASan heap over-read \\
+        V4 & \texttt{decodeHexMessage} & message-length allowlist removed & 787 & synthetic & text & ASan stack overflow \\
+        V5 & \texttt{modeCToModeA} & table-index range check removed & 125 & synthetic & binary & ASan global over-read \\
         \hline
     \end{tabular}}
 \end{table*}
 
-Each task has two test modes. The \emph{trigger} mode runs one or more inputs that exercise the seeded weakness: for example, a nine-byte hex string written into an exactly-sized eight-byte heap buffer (A1), or an odd-frame CPR position at about 87.5\textdegree{} latitude, where the longitude zone count reaches zero (V1). Input strings are copied into exactly-sized heap buffers so that AddressSanitizer catches reads past the terminator. The \emph{functional} mode checks behavior on valid, boundary, and malformed inputs. For the \texttt{can-utils} tasks we wrote these tests ourselves, since the project has no unit tests for \texttt{lib.c}; for the \texttt{dump1090} tasks we reuse the upstream \texttt{cprtests.c} suite.
+Each task has two test modes. The \emph{trigger} mode runs inputs that exercise the seeded weakness, copied into exactly-sized heap buffers so that AddressSanitizer catches reads past the terminator. The \emph{functional} mode checks behavior on valid, boundary, and malformed inputs. For the \texttt{can-utils} and AVR tasks we wrote these tests ourselves; for the CPR tasks we reuse the upstream \texttt{cprtests.c} suite. For A3 and V1 the weakness is reachable from ordinary valid inputs (for example, the frame \texttt{123\#DEADBEEF}), so for these tasks the functional suite also aborts under the sanitizer while the weakness remains.
 
 \subsection{Repair Techniques}
-Each prompt contains the seeded function plus the minimal surrounding context it needs (types, macros, and helper functions), and asks the model to return only the complete revised function. The full prompts are in Appendix~\ref{app:prompts}.
+Each prompt contains the seeded function plus the minimal context it needs (types, macros, and helper functions), and asks the model to return only the complete revised function (Appendix~\ref{app:prompts}).
 \begin{enumerate}
     \item \textbf{T1, plain review:} asks the model to review and correct the function, without mentioning security.
     \item \textbf{T2, security-focused:} states that the function processes untrusted input and asks the model to fix any security vulnerabilities.
-    \item \textbf{T3, static-analysis-guided:} T2 plus the Cppcheck and Semgrep warnings for the function. After each response the patch is re-analyzed; if warnings remain, they are fed back, for at most three model calls.
+    \item \textbf{T3, static-analysis-guided:} T2 plus the Cppcheck and Semgrep warnings for the function; if the patched function triggers warnings, they are fed back, for at most three model calls.
+    \item \textbf{T4, safety-aware:} T2 plus a statement that the code base must comply with MISRA~C:2012, naming the four restrictions in our subset (no dynamic memory, no recursion, a single exit point, and bounded loops).
 \end{enumerate}
-No prompt mentions MISRA or safety rules. The study measures whether safety compliance is preserved \emph{incidentally}, as it would be when a developer asks an assistant for a security fix.
+T1--T3 never mention safety rules, so they measure whether compliance is preserved \emph{incidentally}, as it would be when a developer asks an assistant for a security fix. T4 measures whether stating the requirement is enough.
 
 \subsection{Models and Configuration}
-All inference runs locally on one NVIDIA RTX 4090 (24\,GB) through Ollama 0.40.11, which uses llama.cpp as its backend. We use two open-weight code models from different families: Qwen2.5-Coder-32B-Instruct~\cite{qwen25coder} (Ollama tag \texttt{qwen2.5-coder:32b}) and Codestral-22B~\cite{codestral} (\texttt{codestral:22b}), both at the default 4-bit quantization of their Ollama tags. Generation uses temperature 0.2, seed equal to the repetition number, a 16,384-token context window, and at most 2,048 output tokens. The model IDs reported by Ollama were \texttt{b92d6a0bd47e} (Qwen2.5-Coder, 19\,GB) and \texttt{0898a8b286d5} (Codestral, 12\,GB); the full digest is recorded with every generation.
-
-The model's response is parsed for the target function (fenced code is preferred; includes, helper functions, and example \texttt{main} functions are discarded), and the function is spliced into the seeded file in place of the original. A response with no recoverable function counts as a failed generation.
+All inference runs locally on one NVIDIA RTX 4090 (24\,GB) through Ollama 0.40.11 (llama.cpp backend). We use two open-weight code models from different families: Qwen2.5-Coder-32B-Instruct~\cite{qwen25coder} (\texttt{qwen2.5-coder:32b}, ID \texttt{b92d6a0bd47e}) and Codestral-22B~\cite{codestral} (\texttt{codestral:22b}, ID \texttt{0898a8b286d5}), both at the default 4-bit quantization of their Ollama tags. Generation uses a 16,384-token context, at most 2,048 output tokens, and seed equal to the repetition number. The primary run uses temperature 0.2; a robustness run repeats the full design at temperature 0.8. Each run comprises 10 tasks $\times$ 4 techniques $\times$ 5 repetitions $\times$ 2 models $=$ \stat{patches} patches. The 210 patches of our earlier seven-task run (T1--T3 on A1--A5, V1, and V2, same settings) are reused as part of the primary run after being re-scored with the final harness.
 
 \subsection{Evaluation}
-\textbf{Build and dynamic checks.} Each patched file is compiled with its test driver using GCC with \texttt{-O0 -g -fsanitize=address,undefined -fno-sanitize-recover=all}. The trigger and functional modes are run separately.
+\textbf{Build and dynamic checks.} Each patched file is compiled with its test driver using GCC with \texttt{-O0 -g -fsanitize=address,undefined -fno-sanitize-recover=all}, and the trigger and functional modes are run separately.
 
-\textbf{Security.} Cppcheck (\texttt{--enable=warning,portability}) and Semgrep (the registry C ruleset plus generic rules for unbounded string functions) are run on the patched file, and findings inside the function are compared with those for the pre-patch function. A patch \emph{fixes the CWE} if it builds, its trigger test passes with no sanitizer report, and it adds no new security warnings.
+\textbf{Security.} Cppcheck (\texttt{--enable=warning,portability --max-configs=1}) and Semgrep (the registry C ruleset plus generic rules for unbounded string functions) are run on the patched file; findings inside the function are compared with those for the pre-patch function. A patch \emph{fixes the CWE} if it builds, its trigger test passes with no sanitizer report, and it adds no new security warnings.
 
-\textbf{Safety.} We check a fixed subset of MISRA~C:2012 using the Cppcheck MISRA addon: no dynamic memory (Rule~21.3), no recursion (Rule~17.2), single point of exit (Rule~15.5), and well-formed \texttt{for} loops (Rule~14.2). Because Rule~14.2 covers only \texttt{for} loops, a custom Semgrep rule flags \texttt{while} and \texttt{do} loops that terminate only on constant or data-dependent conditions. Since the upstream code is not fully compliant, we count violations \emph{introduced} by a patch relative to the pre-patch (seeded) function the model was given.
+\textbf{Safety.} We check a fixed subset of MISRA~C:2012 with the Cppcheck MISRA addon: no dynamic memory (Rule~21.3), no recursion (Rule~17.2), single point of exit (Rule~15.5), and well-formed \texttt{for} loops (Rule~14.2), plus a custom Semgrep rule for \texttt{while} and \texttt{do} loops that terminate only on constant or data-dependent conditions. Because the upstream code is not fully compliant, we count only violations \emph{introduced} relative to the pre-patch (seeded) function.
 
 \textbf{Functionality.} A patch is functional if it builds and passes all functional tests.
 
-\textbf{Metrics.} For each technique, model, task, and domain we report the CWE-fix rate, the safety-violation-introduction rate, the functional pass rate, and the \emph{joint success} rate (CWE fixed, functional, and no safety violation introduced). For RQ2, a \emph{tool disagreement} occurs when the security tools report no new warnings but the safety checker reports a new violation, or the reverse. As a contamination signal we report whether a patch exactly matches the upstream fixed function after whitespace and comment normalization, and its sequence similarity to that function.
+\textbf{Metrics.} We report the CWE-fix rate, the safety-violation-introduction rate, the functional pass rate, and the \emph{joint success} rate: CWE fixed, functional, and no safety violation introduced. A \emph{tool disagreement} occurs when the security tools report no new warnings but the safety checks report a new violation, or the reverse. As a contamination signal, we check whether a patch matches the upstream fixed function exactly after whitespace and comment normalization.
 
-\textbf{Analysis.} We report descriptive rates and compare domains with two-sided Fisher's exact tests on per-technique counts. Disagreement cases will be coded qualitatively by the kind of code change that caused them.
+\subsection{Statistical Analysis}
+We compare rates with two-sided Fisher's exact tests. At low temperature a model often returns the same patch for several seeds, so repetitions are not independent and patch-level tests overstate significance. We therefore report two further analyses for every comparison: a \emph{distinct-patch} test, counting each unique normalized patch once per model, task, and technique, and a \emph{cell-level sign test} over model $\times$ task cells, which treats each cell as one independent unit. Within each family of twelve comparisons we apply a Bonferroni correction ($\alpha = 0.05/12 \approx 0.0042$); results that do not survive it are labeled exploratory.
+
+\subsection{Qualitative Analysis}
+We exported every distinct patch on which the tools disagreed, that fixed the CWE but introduced a violation, or that failed a historical seed or V2, together with its diff and heuristic labels. Each was assigned one code: \emph{guard clause with return}, \emph{restructured condition}, \emph{clamp or mask}, \emph{incomplete bound}, \emph{deleted logic}, \emph{rewrite}, \emph{no change}, or \emph{other}. The first author coded the automotive cases and the second the avionics cases; both independently coded a random sample of 20 cases to measure agreement.
+
+\subsection{Deviations from the Plan}
+The study plan changed in four ways, each recorded with its reason in the repository's decision log. (1) The avionics targets moved from the Mode~S message decoder, which cannot be tested in isolation, to \texttt{cpr.c}, \texttt{net\_io.c}, and \texttt{mode\_ac.c}. (2) After a seven-task pilot showed that domain was confounded with representation, we added three avionics tasks (V3--V5), two of them text parsers, and a representation factor. (3) We added the safety-aware technique T4 and the temperature-0.8 robustness run. (4) Cppcheck analyzes only the build configuration (\texttt{--max-configs=1}); this left all ten baselines unchanged and reduced analysis time for \texttt{net\_io.c} from about 35 to 3 seconds.
 
 \subsection{Reproducibility and Ethics}
-The harness, seed patches, test drivers, prompts, rules, and all raw generations and per-patch results are publicly available at \url{https://github.com/Ac3ofHardts/llm-repair-safety-eval}; repository commits are pinned, and every prompt, raw response, model digest, and decoding setting is logged. Generation and evaluation can both be resumed after interruption. Tool versions: GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1), Cppcheck 2.19.0, Semgrep 1.183.0, Python 3.14.4, and Ollama 0.40.11. The study uses only public open-source code, involves no human subjects, and never interacts with a vehicle, aircraft, or radio transmission. All inference runs locally, so no code is sent to third-party services.
+The benchmark, harness, prompts, rules, raw generations, per-patch results, and coding data are publicly available at \url{https://github.com/Ac3ofHardts/llm-repair-safety-eval}; every table in this paper is generated from the committed results. Tool versions: GCC 15.2.0, Cppcheck 2.19.0, Semgrep 1.183.0, Python 3.14.4, and Ollama 0.40.11. The study uses only public open-source code, involves no human subjects, and never interacts with a vehicle, aircraft, or radio transmission. All inference runs locally.
 
 % =====================================================================
-\section{Changes Since Milestone 1}
-Table~\ref{tab:changes} summarizes the changes made while building the harness, and why.
-
-\begin{table}[t]
-    \centering
-    \caption{Changes since Milestone 1}
-    \label{tab:changes}
-    \footnotesize
-    \resizebox{\linewidth}{!}{%
-\begin{tabular}{|p{1.6cm}|p{2.7cm}|p{3.0cm}|}
-        \hline
-        \textbf{Item} & \textbf{Change} & \textbf{Reason} \\
-        \hline
-        can-utils pin & v2025.01 $\rightarrow$ \texttt{master} (\texttt{834ceef}) & Two relevant upstream security fixes landed after the last release \\
-        \hline
-        dump1090 pin & v10.2 $\rightarrow$ v11.1 & v11.1 is the latest release \\
-        \hline
-        A3 & synthetic $\rightarrow$ historical (\texttt{cbbad5e}) & A real out-of-bounds read fix that postdates both models' training data \\
-        \hline
-        V1, V2 & \texttt{mode\_s.c} decode $\rightarrow$ \texttt{cpr.c} & The message decoder depends on global state, CRC tables, and scoring; \texttt{cpr.c} is self-contained and has upstream tests \\
-        \hline
-        V1 CWE & 125 $\rightarrow$ 369 & The natural check to remove in CPR decoding guards a divisor \\
-        \hline
-        V2 CWE & 190 $\rightarrow$ 20 & CPR arithmetic is floating-point; no natural integer overflow \\
-        \hline
-        Inference & llama.cpp $\rightarrow$ Ollama & Already deployed on the GPU host; same backend \\
-        \hline
-        Safety baseline & upstream $\rightarrow$ pre-patch function & Matches the RQ1 definition; avoids undercounting for historical seeds \\
-        \hline
-    \end{tabular}}
-\end{table}
-
-% =====================================================================
-\section{Preliminary Results}
+\section{Findings}
 \label{sec:results}
+Unless stated otherwise, findings are from the primary run (temperature 0.2, \stat{patches} patches, of which \stat{extracted} contained a recoverable function and \stat{built} compiled). Table~\ref{tab:robust} compares the headline results with the temperature-0.8 run.
 
-\subsection{Seed Verification and Analyzer Baseline}
-All seven seeds passed verification: each original function passes both test modes, and each seeded function fails its trigger test, through a sanitizer report in five tasks and an assertion in two (Table~\ref{tab:tasks}).
+\subsection{Baseline Before Repair}
+All \stat{tasks} seeds passed verification. Before any model is involved, two observations stand out (Table~\ref{tab:baseline}). First, \textbf{neither Cppcheck nor Semgrep reported any warning specific to a seeded weakness} (\stat{seed-specific-flagged} of \stat{tasks} tasks), although every seeded weakness is reachable and sanitizer-detectable. Eight seeded functions produced no warnings at all; in V3 and V4, Cppcheck reported the same pre-existing uninitialized-variable warning in both the original and the seeded \texttt{decodeHexMessage}. Second, \textbf{\stat{upstream-fixes-violating} of the \stat{tasks} human-written upstream fixes introduce new Rule~15.5 violations} relative to the seeded code (\stat{upstream-fix-violations} in total), because they validate input and then return early.
 
 \input{tables/baseline}
 
-Two baseline observations are relevant before any model is involved (Table~\ref{tab:baseline}). First, \textbf{neither Cppcheck 2.19 nor Semgrep (registry C ruleset plus our generic rules) reported any warning on any of the seven seeded functions}, even though every seeded weakness is reachable and sanitizer-detectable. As a result, T3's first call always received an empty warning list; T3 differed from T2 only when a model's own patch triggered a warning that was then fed back. Second, \textbf{the developers' own upstream fixes violate the safety subset}: compared with the seeded code, the upstream fix for A5 adds two Rule~15.5 violations and the fix for V2 adds one, because both validate input and then return early. The conflict between security fixes and MISRA's single-exit rule therefore exists in human-written code as well, not only in LLM output. The table also shows that the upstream code is far from compliant with the subset (\texttt{parse\_canframe} alone has 14 Rule~15.5 violations), which is why we count only violations a patch introduces.
-
-\subsection{Experiment Run}
-We first ran a 42-patch pilot (one repetition) to test the harness, then extended it to the full design of 7 tasks $\times$ 3 techniques $\times$ 5 repetitions $\times$ 2 models $=$ 210 patches; the pilot's patches are repetition~1 of the full run. Generation took 35.2 GPU-minutes in total (about 10 seconds per patch) and produced 103,196 output tokens. Seven generations, all from Codestral, contained no recoverable function, and five more Codestral patches did not compile (four of them on A3 under T2); all 203 extracted Qwen and Codestral patches were otherwise evaluated. Rates below use all 210 attempts (70 per technique) as the denominator. Comparisons between techniques and domains use two-sided Fisher's exact tests; with nine domain tests per metric family we also report which results survive a Bonferroni correction ($\alpha = 0.05/9 \approx 0.0056$).
+\subsection{RQ1: Do Security Fixes Preserve Safety-Rule Compliance?}
+\stat{fixed} of \stat{patches} patches (\stat{fixed-pct}\%) fixed the seeded weakness, and \textbf{\stat{fixed-unsafe} of those (\stat{fixed-unsafe-pct}\%) introduced at least one new safety violation}. Only \stat{joint} patches (\stat{joint-pct}\%) achieved joint success (Table~\ref{tab:technique}).
 
 \input{tables/technique}
 
+The violations are almost all of one kind. \stat{rule15.5-patches} patches introduced \stat{rule15.5-violations} new Rule~15.5 violations; no patch introduced heap allocation (Rule~21.3), recursion (Rule~17.2), or a malformed \texttt{for} loop (Rule~14.2), and \stat{loops-patches} patches introduced \stat{loops-violations} findings from the unbounded-loop rule.
+
+\textbf{Asking for security changed the shape of fixes, not their success.} The security-focused prompt fixed about as many weaknesses as plain review (\stat{T2-fixed} versus \stat{T1-fixed} of \stat{T1-n}; $p = 0.32$) but introduced safety violations about twice as often (\stat{T2-safety} versus \stat{T1-safety}; $p = 0.00045$). The effect held in 10 of the 11 model $\times$ task cells where the two techniques differed (sign test $p = 0.012$), though it was weaker when each distinct patch was counted once (26/51 versus 14/45; $p = 0.063$). It was strongest for Qwen2.5-Coder (\stat{qwen-T1-safety} versus \stat{qwen-T2-safety} of \stat{qwen-T1-n}; Table~\ref{tab:model}) and it replicated at temperature 0.8 (\stat{t08-T1-safety} versus \stat{t08-T2-safety}; $p = 0.0015$; distinct-patch $p = 0.0054$; sign test 11 of 13 cells, $p = 0.023$). The analyzer-guided technique T3 behaved like T2 (\stat{T3-safety} violations, \stat{T3-fixed} fixes). Because the analyzers reported nothing related to the seeded weaknesses, T3's first prompt contained no warnings for eight tasks and only the unrelated pre-existing warning for V3 and V4, and only \stat{T3-feedback} of \stat{T3-n} T3 runs produced a patch that earned a further round of feedback.
+
 \input{tables/model}
+
+A4 shows the pattern within a single task: every patch fixed the out-of-bounds read, but the number that did so with an early return rose from \stat{A4-T1-safety} of 10 under T1 to \stat{A4-T2-safety} under T2 and \stat{A4-T3-safety} under T3.
+
+\subsection{RQ1a: Does Stating the Requirement Help?}
+T4 reduced introduced violations relative to T2 (\stat{T4-safety} versus \stat{T2-safety} of \stat{T2-n}; $p = 0.0096$), but the reduction was not robust at temperature 0.2: it did not hold for distinct patches ($p = 0.11$) and was marginal in the sign test (11 of 14 cells, $p = 0.057$). The effect depended on the model. Qwen2.5-Coder followed the requirement (\stat{qwen-T4-safety} versus \stat{qwen-T2-safety} violations of 50); Codestral largely did not (\stat{codestral-T4-safety} versus \stat{codestral-T2-safety}). At temperature 0.8 the reduction was large and survived every test (\stat{t08-T4-safety} versus \stat{t08-T2-safety}; $p < 10^{-5}$; distinct-patch $p < 10^{-5}$; sign test 14 of 16 cells, $p = 0.0042$).
+
+Stating the requirement did not, however, produce more fully acceptable patches. Joint success under T4 was no higher than under T2 at either temperature (\stat{T4-joint} versus \stat{T2-joint}; \stat{t08-T4-joint} versus \stat{t08-T2-joint}), because the fix rate drifted down (\stat{T4-fixed} versus \stat{T2-fixed}; not significant). The cost was concentrated in V1 and V2, which no T4 patch fixed (\stat{V1-T4-fixed} and \stat{V2-T4-fixed} of 10), while T4 fixed V5 in \stat{V5-T4-fixed} of 10 attempts. T4 also had an unexpected effect on the simplest automotive tasks: violations in A1 rose from \stat{A1-T2-safety} to \stat{A1-T4-safety} of 10 and in A2 from \stat{A2-T2-safety} to \stat{A2-T4-safety}. \todo{Explain from the coding sheet: what do the A1/A2 T4 patches do (loops? still early returns?)}
+
+\subsection{RQ2: Do Security and Safety Tools Disagree?}
+The tools disagreed on \stat{disagree} of the \stat{extracted} extracted patches (\stat{disagree-pct}\%), almost always in one direction: \stat{sec-ok-safety-bad} patches were accepted by the security analyzers but flagged by the safety checks, and only \stat{safety-ok-sec-bad} the reverse. For the \stat{fixed-unsafe} patches that fixed the CWE and introduced a violation, the sanitizer-backed trigger test confirms the fix, so a security-only pipeline would have accepted them as correct. The same asymmetry held at temperature 0.8 (\stat{t08-sec-ok-safety-bad} versus \stat{t08-safety-ok-sec-bad}).
+
+\subsection{RQ3: Domain and Representation}
+Fix rates differed sharply across the four domain $\times$ representation groups (Table~\ref{tab:task}): automotive text \stat{automotive-text-fixed}/\stat{automotive-text-n}, automotive binary \stat{automotive-binary-fixed}/\stat{automotive-binary-n}, avionics text \stat{avionics-text-fixed}/\stat{avionics-text-n}, and avionics binary \stat{avionics-binary-fixed}/\stat{avionics-binary-n}. Holding representation fixed, automotive text tasks were fixed far more often than avionics text tasks ($p < 10^{-13}$; distinct-patch $p = 0.0004$). Holding domain fixed, avionics binary tasks were fixed far more often than avionics text tasks ($p < 10^{-6}$; distinct-patch $p = 0.0022$). Both differences survive the Bonferroni correction and replicate at temperature 0.8.
+
+Safety violations show no consistent domain effect. Among text tasks, the automotive and avionics violation rates differed at temperature 0.2 ($p = 0.023$, not significant after correction; distinct-patch $p = 0.067$) but not at temperature 0.8 ($p = 0.88$). Among avionics tasks, binary tasks gained violations more often than text tasks ($p = 0.00023$), but not when distinct patches were counted ($p = 0.11$).
 
 \input{tables/task}
 
-\subsection{RQ1: Do Security Fixes Preserve Safety-Rule Compliance?}
-Of the 210 patches, 117 (56\%) fixed the seeded weakness, and 44 of those 117 (38\%) introduced at least one new safety violation. Only 68 patches (32\%) achieved joint success. In other words, more than a third of the fixes that a security-plus-functionality evaluation would accept are not acceptable under the safety subset.
-
-\textbf{Every introduced violation was Rule~15.5} (single point of exit): 106 new violations across 74 patches, and none of Rules 21.3, 17.2, or 14.2 or the custom loop rule. The models never introduced heap allocation, recursion, or unbounded loops; the conflict lies entirely in how they structure input validation, as guard clauses that return early.
-
-\textbf{Asking for security changed the shape of fixes much more than their success} (Table~\ref{tab:technique}). The security-focused prompt fixed about as many weaknesses as plain review (38/70 versus 36/70, $p = 0.87$) but nearly doubled the rate of introduced safety violations (30/70 versus 16/70, $p = 0.019$). T3 behaved similarly (28/70, $p = 0.045$ versus T1). The effect is strongest for Qwen2.5-Coder, which introduced a violation in 1 of 35 patches under T1 and 12 of 35 under T2 ($p = 0.001$), with almost no change in its fix rate (20 versus 21; Table~\ref{tab:model}). Codestral introduced violations at a similar rate under all three techniques (13--18 of 35), and achieved joint success far less often than Qwen (18 versus 50 of 105 patches). A4 shows the effect within a single task (Table~\ref{tab:task}): all 30 patches fixed the out-of-bounds read, but the number that did so with an early return rose from 6 under T1 to 8 under T2 and 9 under T3.
-
-\textbf{The analyzer feedback loop almost never ran.} Because the analyzers reported nothing on the seeded functions, only 3 of 70 T3 runs (all Codestral) produced a patch that triggered a warning and earned a second call; every Qwen T3 run was a single call. T3 therefore differed from T2 almost entirely in wording: it names Cppcheck and Semgrep and states that no warnings were reported. That wording alone coincided with more fixes for Qwen (28 versus 21 of 35 under T2), though the difference is not significant ($p = 0.12$).
-
-\subsection{RQ2: Do Security and Safety Tools Disagree?}
-The tools disagreed on 77 of the 203 extracted patches (38\%), almost always in one direction: 73 patches were accepted by the security analyzers but flagged by the safety checker, and only 4 the reverse (all four are Codestral A3 patches under T2 that did not compile). In 44 of the 73, the sanitizer-backed trigger test confirms that the weakness was actually fixed, so a security-only pipeline would have accepted these patches as correct. Together with the analyzer baseline, which flagged none of the seeded weaknesses, this shows the two tool families measuring different things: in this setting the safety checker objected to many more patches than the security tools objected to the vulnerabilities themselves.
-
-\subsection{RQ3: Does the Tradeoff Differ by Domain?}
-Overall, automotive patches fixed the weakness more often than avionics patches (95/150, 63\%, versus 22/60, 37\%; $p < 0.001$), and introduced safety violations somewhat more often (59/150 versus 15/60; $p = 0.056$). Per technique, the differences are concentrated in T1 and T2. Under T1, avionics patches introduced no safety violations (0/20 versus 16/50, $p = 0.003$) but also rarely fixed the weakness (6/20 versus 30/50, $p = 0.034$) or reached joint success (1/20 versus 19/50, $p = 0.007$). Under T2, the avionics fix rate stayed low (5/20 versus 33/50, $p = 0.003$) while avionics safety violations rose from 0/20 to 10/20, no longer different from automotive. Under T3 no difference was significant. Only the T1 safety and T2 fix-rate differences survive the Bonferroni correction.
-
-These differences should not yet be read as an effect of text versus binary representation. The avionics domain contains only two tasks, and they behave very differently from each other (Table~\ref{tab:task}). V1 rarely gained safety violations under any technique. V2 gained them in 9 of 10 patches under T2, and \textbf{no V2 patch under any technique achieved joint success}: patches fixed the latitude check or kept the upstream CPR tests passing, but never both. The two models failed in opposite ways: Qwen's T1 patches rewrote the function substantially (similarity 0.31 to upstream) and rejected the out-of-range latitude but broke the upstream tests, while Codestral's patches kept the tests passing without adding the missing check. With two tasks per domain-side comparison, domain is confounded with task, so the RQ3 differences may reflect V1 and V2 specifically.
+These group differences should not be read as effects of domain or representation as such. The avionics text group consists of V3 and V4, which are two seeds in the same long function, \texttt{decodeHexMessage}; it was fixed in \stat{avionics-text-fixed} of \stat{avionics-text-n} attempts and never reached joint success. The automotive binary group is a single task, A4. The table shows more variation between tasks within a group than between groups (for example, V5 under T1--T3 always gained a violation, while V1 almost never did). Our data therefore support task- and function-level differences, not a general domain or representation effect.
 
 \subsection{Synthetic Versus Historical Seeds}
-The largest effect in the data is the difference between seed types. Synthetic seeds were fixed in 111 of 150 patches (74\%); historical seeds in only 6 of 60 (10\%; $p < 10^{-17}$). No patch fixed A3 (0/30). A3's functional rate is also 0/30, but this is a consequence of the unfixed weakness, not of strict tests: the seeded out-of-bounds read fires on ordinary valid frames such as \texttt{123\#DEADBEEF}, so the functional suite aborts under AddressSanitizer whenever the defect remains. The same holds for V1, whose divide by zero is reached by the polar-latitude cases in the upstream CPR tests; for both tasks, passing the functional suite implies fixing the weakness. A5 was fixed only under the security-focused techniques (3/10 for each of T2 and T3, 0/10 for T1); most A5 patches passed the functional tests, which use a large buffer, but failed the trigger test, which exercises truncation into an exactly-sized small buffer, where the original defect lies. No patch reproduced an upstream fix verbatim (0/203), and mean similarity to the upstream function was lower for historical tasks (0.77) than for synthetic tasks (0.81). Since the A3 fix also postdates both models' training data, memorization does not explain success. Synthetic seeds, which delete a single obvious check, are much easier than real defects; benchmarks built only from deleted checks are therefore likely to overstate repair ability.
+The largest effect in the data is the difference between seed types. Synthetic seeds were fixed in \stat{synthetic-fixed} of \stat{synthetic-n} patches (\stat{synthetic-fixed-pct}\%); historical seeds in only \stat{historical-fixed} of \stat{historical-n} (\stat{historical-fixed-pct}\%; $p < 10^{-17}$). The gap replicated at temperature 0.8 (\stat{t08-synthetic-fixed-pct}\% versus \stat{t08-historical-fixed-pct}\%; $p < 10^{-14}$). At temperature 0.2 no patch fixed A3 under any technique, and V3 was fixed only under T2. No patch for a historical task matched the upstream fix, and A3's fix postdates both models' training data, so memorization does not explain success on the synthetic tasks either.
 
-\subsection{Problems Encountered and Changes Made}
-\begin{itemize}
-    \item \textbf{Silent MISRA checker.} Running the MISRA addon through \texttt{cppcheck --addon=misra} produced no output with the distribution package. We now generate a Cppcheck dump file and run the addon script directly, and validated it on code with known violations.
-    \item \textbf{Wrong baseline for ``introduced'' violations.} An early version compared patches with the upstream function. For historical seeds the upstream fix itself adds early returns, so this undercounted new violations. We now compare with the pre-patch function, as RQ1 specifies.
-    \item \textbf{Bundled kernel headers.} \texttt{can-utils} requires CAN~XL definitions newer than the host's kernel headers; the harness builds against the project's bundled \texttt{include/} directory.
-    \item \textbf{Untestable decoder.} The originally planned \texttt{mode\_s.c} target could not be tested in isolation, so the avionics tasks moved to \texttt{cpr.c} (Table~\ref{tab:changes}).
-    \item \textbf{Response formats.} Models wrap code in prose, add includes, helper functions, or example \texttt{main} functions, or return no code. The extractor keeps only the target function; seven Codestral responses had none and are counted as failures.
-\end{itemize}
+\subsection{Robustness}
+\input{tables/robustness}
+Table~\ref{tab:robust} compares the two runs. At temperature 0.2, \stat{duplicates} of the \stat{extracted} extracted patches duplicated another patch in the same model, task, and technique cell (Qwen2.5-Coder produced only \stat{qwen-distinct} distinct patches out of \stat{qwen-extracted}); at temperature 0.8 there were \stat{t08-duplicates}. Every headline result except the size of the T4 effect held at both temperatures.
+
+\subsection{Qualitative Analysis}
+\todo{Fill in after coding: number of coded cases, agreement and Cohen's kappa, a code x technique table (guard clause share under T2/T3 vs T4), code x seed type, and 2--3 short before/after examples (one guard clause, one T4 restructured fix, one incomplete historical fix).}
 
 % =====================================================================
-\section{Threats to Validity}
-\textbf{Data contamination.} Both codebases are public. We mitigate this with a historical seed (A3) whose fix postdates the models' training data, with exact-match and similarity checks against upstream code, and by reporting synthetic and historical seeds separately.
-\textbf{Task--domain confound.} Each domain is represented by few tasks (five automotive, two avionics), so domain differences cannot yet be separated from the behavior of individual tasks.
-\textbf{Non-independent repetitions.} At temperature 0.2, Qwen often produced the same patch for every seed (for example, all 15 of its A1 patches are identical), so the five repetitions are not independent samples. Fisher's exact tests treat them as independent and therefore overstate significance; the reported $p$-values should be read as optimistic.
-\textbf{Multiple comparisons.} We report many rate comparisons on a modest sample; we flag which domain results survive a Bonferroni correction and treat the others as exploratory.
-\textbf{Model generalizability.} 4-bit open-weight models that fit in 24\,GB may not represent larger or proprietary models; in exchange, fixed local weights make every run reproducible.
-\textbf{Tool coverage.} The MISRA subset is small and free checkers implement only part of the standard; we report the subset explicitly and do not claim compliance. The loop rule is a heuristic.
-\textbf{Test adequacy.} Our functional tests for \texttt{lib.c} are author-written and may be stricter or looser than real usage; the trigger tests confirm only the seeded weakness, not every possible defect. In particular, V2's absence of joint successes needs manual inspection to confirm that the upstream CPR tests reject only genuinely wrong behavior.
+\section{Discussion}
+
+\subsection{The Conflict Is Structural, Not Specific to LLMs}
+Every introduced violation but a handful was a Rule~15.5 violation, and the coded patches show where they come from: \todo{coding result, e.g. ``x\% of fixed-but-unsafe patches add a guard clause that returns early''}. The same idiom appears in \stat{upstream-fixes-violating} of the \stat{tasks} human-written upstream fixes. The tension is therefore between MISRA's single-exit rule and the conventional way of writing input validation, rather than an artifact of LLM generation. Two consequences follow. A security-repair pipeline for regulated code needs an explicit safety gate, because neither security analyzers nor functional tests detect the regression (RQ2). And evaluations of secure code generation in safety-critical domains should treat safety-standard compliance as a third outcome alongside security and functionality~\cite{rethinking2026, peng2025cweval}.
+
+\subsection{Asking for Security Has a Hidden Cost; Asking for Safety Is Not Free}
+The security-focused prompt did not make patches more secure than a plain review; it changed how they were written, toward guard clauses. Stating the MISRA requirement pushed in the opposite direction, but its benefit depended on the model and sampling temperature, and it did not increase the number of fully acceptable patches, because some fixes became incomplete. This mirrors Umer's observation that chat assistants do not reliably produce MISRA-compliant code even when asked~\cite{umer2025misra}. For practitioners, the implication is that prompt wording is not a substitute for checking: the requirement should be stated, but the patch must still be verified against both the security and the safety oracle.
+
+\subsection{Static Analyzers Were Blind; Dynamic Oracles Were Not}
+Neither analyzer reported anything specific to the seeded weaknesses, so analyzer-guided repair (T3) had nothing relevant to act on and behaved like T2. This is consistent with Lipp et al.'s finding that static C analyzers miss many real vulnerabilities~\cite{lipp2022static} and with Yan et al.'s finding that analyzer feedback is only as useful as its content~\cite{yan2025guiding}. Sanitizer-backed trigger tests detected all ten weaknesses. For evaluating LLM repair of memory-safety weaknesses, dynamic oracles were essential.
+
+\subsection{Synthetic Seeds Overstate Repair Ability}
+Removing a single obvious check produced weaknesses that the models fixed most of the time; restoring the logic of a real upstream bug produced weaknesses they rarely fixed. Real fixes often involve several coordinated checks (A3 adds length checks before three separate delimiter reads; A5 checks every \texttt{snprintf} return value), while the synthetic seeds remove one. Benchmarks built only from deleted checks may therefore overstate how well LLMs repair real code, a concern that complements Dai et al.'s critique of security-only evaluation~\cite{rethinking2026}.
+
+\subsection{What Varies Is the Function, Not the Domain}
+The large domain and representation differences in fix rate trace back to individual functions, especially \texttt{decodeHexMessage}. The safety tradeoff itself, by contrast, appeared in both domains and both representations. We read this as evidence that the safety conflict is a property of the repair idiom, while repair difficulty is a property of the code being repaired.
+
+\subsection{Practical Guidance}
+For engineers using LLMs to fix security weaknesses in embedded C: (1) run the project's safety checker on every LLM patch, since neither security tools nor tests catch the regression; (2) state the coding standard in the prompt, but do not rely on it; (3) confirm the fix with a dynamic test that triggers the weakness, because static analyzers may not see it; and (4) expect weaknesses that need several coordinated checks to be repaired incompletely.
 
 % =====================================================================
-\section{Remaining Work}
-\label{sec:remaining}
-\begin{enumerate}
-    \item \textbf{Rebalance domains.} Add avionics tasks from \texttt{dump1090}'s network input parsers (the Beast binary and AVR hex message decoders in \texttt{net\_io.c}), ideally from real upstream length-check fixes, and run them through the same design. This is the most important step for RQ3, given the task--domain confound.
-    \item \textbf{Qualitative coding.} Classify every disagreement case and every A3, A5, and V2 failure by the kind of change the model made (guard clause, restructured condition, deleted logic, incomplete bound), and confirm that the V2 tests reject only genuinely wrong behavior.
-    \item \textbf{Exploratory condition.} A safety-aware prompt that mentions MISRA~C, to test whether the Rule~15.5 conflict disappears when asked for, and at what cost to the fix rate.
-    \item \textbf{Independent samples.} Re-run with a higher sampling temperature, or analyze at the level of distinct patches per task, technique, and model, so that statistical tests do not count duplicate patches.
-    \item \textbf{Final analysis and paper.} Discussion, comparison with related work, and conclusions.
-\end{enumerate}
-The main risk to completion is the domain rebalancing; if new avionics tasks cannot be verified in time, RQ3 will be reported as task-level results with the confound stated explicitly.
+\section{Limitations}
+\textbf{Construct validity.} Our safety criterion is a four-rule MISRA subset plus a heuristic loop rule, checked by a free tool; full MISRA compliance would involve many more rules. Our security criterion is the seeded weakness plus static warnings, so a patch could introduce a different vulnerability that neither detects.
+\textbf{Internal validity.} At low temperature many repetitions produced identical patches, so patch-level tests overstate significance; we report distinct-patch and cell-level tests and treat results that do not survive them as exploratory. The T4 effect depended on sampling temperature, which suggests sensitivity to prompt and decoding settings that we did not explore further. Qualitative codes involve judgment; we report inter-rater agreement on a double-coded sample. Our functional tests for \texttt{can-utils} and the AVR parser are author-written.
+\textbf{External validity.} We study ten tasks in two codebases, two 4-bit open-weight models, and one prompt per technique. Each domain $\times$ representation group contains between one and four tasks, and two avionics tasks share one function, so group-level comparisons cannot be separated from task effects. Results may differ for larger or proprietary models.
+\textbf{Data contamination.} Both codebases are public. No historical-task patch reproduced the upstream fix, and the A3 fix postdates the models' training data, but contamination of the synthetic tasks cannot be ruled out entirely.
+\textbf{Reproducibility.} Build outcomes can depend on the compiler: in a re-run with GCC~13, four patches compiled that do not compile with GCC~15. All results reported here were produced with the versions listed in Section~\ref{sec:method}.
+
+% =====================================================================
+\section{Conclusion}
+We evaluated LLM security repair of embedded transportation code on three axes: security, functionality, and compliance with MISRA~C safety rules.
+
+\textbf{RQ1:} No. Half of the patches that removed the weakness introduced a safety violation, almost always an early return that breaks MISRA's single-exit rule, and asking specifically for a security fix made this roughly twice as likely without fixing more weaknesses. \textbf{RQ1a:} Partly. Stating the requirement reduced violations, robustly for one model, but did not increase the number of patches that were secure, functional, and compliant at once. \textbf{RQ2:} Yes. The security and safety tools disagreed on about two in five patches, almost always with the security tools accepting a patch that the safety checker rejected, and the security analyzers reported nothing specific to any seeded weakness. \textbf{RQ3:} The safety tradeoff appeared in both domains and both representations; the large differences we observed in fix rates trace to individual functions rather than to domain or representation.
+
+Our main contribution is evidence that safety-standard compliance is a missing, and systematically violated, dimension in the evaluation of LLM security repair, together with a reproducible benchmark for measuring it. Future work should (1) broaden the benchmark with more historical seeds per domain and representation, (2) evaluate larger and proprietary models and agentic repair loops that run the safety checker, and (3) extend the safety criterion to the full MISRA~C rule set using a qualified checker.
 
 % =====================================================================
 \section*{Author Contributions}
-E.~C.~Hardt led the automotive (\texttt{can-utils}) tasks and B.~S.~Swartley led the avionics (\texttt{dump1090}) tasks, including seeding, test drivers, and seed verification for each. Both authors jointly designed the evaluation harness, the MISRA~C rule subset, the metrics, and the cross-domain analysis, and both wrote the paper.
+E.~C.~Hardt led the automotive tasks, ran the experiments, and coded the automotive cases. B.~S.~Swartley led the avionics tasks and coded the avionics cases. Both authors designed the evaluation harness, the MISRA~C rule subset, the metrics, and the analysis, and both wrote the paper. \todo{Confirm the split.}
 
 % =====================================================================
 \appendices
@@ -331,7 +328,25 @@ Return only the complete revised function `{name}` in a single ```c code block. 
 \end{lstlisting}
 When no warnings are reported, \texttt{\{warnings\}} is ``- (no warnings were reported)''. In later T3 rounds, \texttt{\{function\}} is the model's previous output.
 
+\textbf{T4 (safety-aware)}
+\begin{lstlisting}
+The following C function is part of {project}. It processes untrusted input {input_source}. Fix any security vulnerabilities in the function.
+
+The code base must comply with the MISRA C:2012 coding guidelines for safety-critical software. Your fix must not use dynamic memory allocation, must not use recursion, must have a single point of exit at the end of the function, and every loop must have a fixed upper bound.
+
+Relevant definitions from the same code base:
+{context}
+
+Function to fix:
+{function}
+
+Return only the complete revised function `{name}` in a single ```c code block. Keep the same name and signature, and do not include any other functions.
+\end{lstlisting}
+
+
 % =====================================================================
+
+
 \bibliographystyle{IEEEtran}
 \bibliography{references}
 

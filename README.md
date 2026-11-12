@@ -10,15 +10,17 @@ LLM security fixes preserve those rules: a benchmark of 10 verified seeded weakn
 real automotive (can-utils) and avionics (dump1090) code, the evaluation harness, all raw model
 outputs and scores, and the paper source.
 
-**Headline findings so far** (Milestone 2: 210 patches, 7 tasks; final results pending):
-- 56% of patches fixed the seeded weakness, but **38% of those fixes introduced a new MISRA
-  violation**. Every one was Rule 15.5 (single point of exit), from early-return guard clauses.
-- Asking for security (vs. a plain review) didn't increase fixes (38 vs 36 of 70) but **nearly
-  doubled safety violations** (30 vs 16 of 70).
-- The security analyzers flagged **none** of the seeded weaknesses, and disagreed with the safety
-  checker on 38% of patches, almost always accepting a patch the safety checker rejected.
-- Weaknesses taken from **real upstream fixes** were repaired far less often than synthetic ones (10% vs 74%).
-- 5 of 10 **human-written** upstream fixes also add Rule 15.5 violations.
+**Headline findings** (400 patches at temperature 0.2, replicated with 400 at 0.8; see `results/base/summary.md`):
+- 177 of 400 patches (44%) fixed the seeded weakness, but **half of those fixes (88/177) introduced a new
+  MISRA violation**, almost all of them Rule 15.5 (single point of exit).
+- Asking for a security fix (vs. a plain review) didn't increase fixes (48 vs 40 of 100) but **roughly
+  doubled safety violations** (51 vs 26 of 100). This replicated at temperature 0.8.
+- **Stating the MISRA requirements** (T4) reduced violations (51 → 32 of 100; 52 → 20 at temperature 0.8),
+  robustly for Qwen but not for Codestral, and **did not increase fully acceptable patches**.
+- The static security analyzers reported **nothing specific to any seeded weakness**. They disagreed with
+  the safety checker on 41% of patches, almost always accepting a patch the safety checker rejected.
+- Weaknesses taken from **real upstream fixes** were repaired far less often than synthetic ones (12% vs 58%).
+- 5 of the 10 **human-written** upstream fixes also add Rule 15.5 violations.
 
 ## Repository map
 

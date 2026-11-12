@@ -173,7 +173,23 @@ def task_table(rows, cfg):
         r"\end{table*}", ""])
 
 
-def macros(rows, base):
+SHORT_MODEL = {"qwen2.5-coder:32b": "qwen", "codestral:22b": "codestral"}
+
+
+def distinct_rows(rows):
+    seen, out = set(), []
+    for r in rows:
+        if not truthy(r["extracted"]):
+            continue
+        k = (r["model"], r["task"], r["technique"], r.get("patch_hash") or r["run_id"])
+        if k not in seen:
+            seen.add(k)
+            out.append(r)
+    return out
+
+
+def stat_values(rows, base):
+    """All numbers the prose may cite, as a flat {key: value} dict."""
     s = {}
     ext = [r for r in rows if truthy(r["extracted"])]
     fixed = n(rows, "cwe_fixed")
@@ -188,6 +204,30 @@ def macros(rows, base):
               "sec-ok-safety-bad": sum(truthy(r["tool_sec_ok"]) and not truthy(r["tool_safety_ok"]) for r in ext),
               "safety-ok-sec-bad": sum(truthy(r["tool_safety_ok"]) and not truthy(r["tool_sec_ok"]) for r in ext)})
     rule_cols = [c for c in rows[0] if c.startswith("misra_") and c.endswith("_new")]
+    loops = [int(r.get("loops_new") or 0) for r in rows]
+    s["loops-patches"], s["loops-violations"] = sum(v > 0 for v in loops), sum(loops)
+    d = distinct_rows(rows)
+    s["distinct"], s["duplicates"] = len(d), len(ext) - len(d)
+    for m in {r["model"] for r in rows}:
+        me = [r for r in ext if r["model"] == m]
+        s[f"{SHORT_MODEL.get(m, m)}-distinct"] = len([r for r in d if r["model"] == m])
+        s[f"{SHORT_MODEL.get(m, m)}-extracted"] = len(me)
+    t3 = [r for r in rows if r["technique"] == "T3"]
+    s["T3-feedback"] = sum(int(r.get("n_calls") or 0) > 1 for r in t3)
+    s["T3-n"] = len(t3)
+    combos = defaultdict(list)
+    for r in rows:
+        combos[(SHORT_MODEL.get(r["model"], r["model"]), r["technique"])].append(r)
+        combos[(r["task"], r["technique"])].append(r)
+        combos[(r["domain"], r["technique"])].append(r)
+        combos[(r["domain"], r.get("representation", ""))].append(r)
+        combos[(r["seed_type"], r["technique"])].append(r)
+    for (a, b), rs in combos.items():
+        for m, col in (("fixed", "cwe_fixed"), ("safety", "safety_violation_introduced"),
+                       ("joint", "joint_success"), ("functional", "functional_pass"),
+                       ("extracted", "extracted"), ("built", "build_ok")):
+            s[f"{a}-{b}-{m}"] = n(rs, col)
+        s[f"{a}-{b}-n"] = len(rs)
     for c in rule_cols:
         rule = c.replace("misra_", "").replace("_new", "").replace("_", ".")
         vals = [int(r[c] or 0) for r in rows]
@@ -208,8 +248,24 @@ def macros(rows, base):
             s[f"{g}-n"] = len(rs)
     if base:
         s["seeded-flagged"] = sum(1 for b in base.values() if b["seeded"]["sec_warnings"])
+        # warnings that differ between original and seeded function (ignoring line numbers):
+        # i.e. warnings that could point at the seeded weakness
+        def kinds(ws):
+            return sorted(w.rsplit(" L", 1)[0] for w in ws)
+        s["seed-specific-flagged"] = sum(1 for b in base.values()
+                                         if kinds(b["seeded"]["sec_warnings"]) != kinds(b["original"]["sec_warnings"]))
+        s["preexisting-flagged"] = sum(1 for b in base.values() if b["original"]["sec_warnings"])
         s["tasks"] = len(base)
         s["upstream-fixes-violating"] = sum(1 for b in base.values() if b.get("upstream_fix_introduces_misra"))
+        s["upstream-fix-violations"] = sum(sum(b.get("upstream_fix_introduces_misra", {}).values())
+                                           for b in base.values())
+    return s
+
+
+def macros(rows, base, extra=None):
+    s = stat_values(rows, base)
+    for prefix, vals in (extra or {}).items():
+        s.update({f"{prefix}-{k}": v for k, v in vals.items()})
     lines = [r"\makeatletter"]
     for k in sorted(s):
         lines.append(rf"\expandafter\def\csname stat@{k}\endcsname{{{s[k]}}}")
@@ -220,10 +276,49 @@ def macros(rows, base):
     return "\n".join(lines)
 
 
+ROBUST_ROWS = [
+    ("Fixes that introduce a safety violation", "fixed-unsafe", "fixed"),
+    ("Safety violations, T1 plain", "T1-safety", "T1-n"),
+    ("Safety violations, T2 security", "T2-safety", "T2-n"),
+    ("Safety violations, T4 safety-aware", "T4-safety", "T4-n"),
+    ("CWE fixed, T1 plain", "T1-fixed", "T1-n"),
+    ("CWE fixed, T2 security", "T2-fixed", "T2-n"),
+    ("CWE fixed, T4 safety-aware", "T4-fixed", "T4-n"),
+    ("Joint success, T2 security", "T2-joint", "T2-n"),
+    ("Joint success, T4 safety-aware", "T4-joint", "T4-n"),
+    ("Tool disagreements (extracted patches)", "disagree", "extracted"),
+    ("CWE fixed, synthetic seeds", "synthetic-fixed", "synthetic-n"),
+    ("CWE fixed, historical seeds", "historical-fixed", "historical-n"),
+    ("Distinct patches (of extracted)", "distinct", "extracted"),
+]
+
+
+def robustness_table(a, b, label_a, label_b):
+    body = []
+    for name, num, den in ROBUST_ROWS:
+        if num in a and num in b:
+            body.append(f"        {name} & {a[num]}/{a.get(den, '?')} & {b[num]}/{b.get(den, '?')} \\\\")
+    return "\n".join([
+        r"\begin{table}[t]",
+        r"    \centering",
+        f"    \\caption{{Robustness: headline results at both sampling temperatures}}",
+        r"    \label{tab:robust}",
+        r"    \footnotesize",
+        r"    \resizebox{\linewidth}{!}{%",
+        r"    \begin{tabular}{|l|c|c|}",
+        r"        \hline",
+        f"        \\textbf{{Result}} & \\textbf{{{label_a}}} & \\textbf{{{label_b}}} \\\\",
+        r"        \hline", *body, r"        \hline",
+        r"    \end{tabular}}",
+        r"\end{table}", ""])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="base")
     ap.add_argument("--out", default=str(ROOT / "paper" / "tables"))
+    ap.add_argument("--robust-tag", default="t08",
+                    help="second tag for the robustness table and <tag>- prefixed macros")
     args = ap.parse_args()
     src = RESULTS / args.tag
     if not (src / "results.csv").exists():
@@ -235,8 +330,19 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     rel = f"results/{args.tag}"
+    extra, rsrc = {}, RESULTS / args.robust_tag / "results.csv"
     files = {"technique.tex": technique_table(rows), "model.tex": model_table(rows),
-             "task.tex": task_table(rows, cfg), "macros.tex": macros(rows, base)}
+             "task.tex": task_table(rows, cfg)}
+    if args.robust_tag and args.robust_tag != args.tag and rsrc.exists():
+        with open(rsrc) as f:
+            rrows = [r for r in csv.DictReader(f) if r["model"] not in EXCLUDE_MODELS]
+        rbase = RESULTS / args.robust_tag / "baselines.json"
+        rb = json.loads(rbase.read_text()) if rbase.exists() else {}
+        extra[args.robust_tag] = stat_values(rrows, rb)
+        files["robustness.tex"] = robustness_table(stat_values(rows, base), extra[args.robust_tag],
+                                                   "Temp.\\ 0.2" if args.tag == "base" else args.tag,
+                                                   "Temp.\\ 0.8" if args.robust_tag == "t08" else args.robust_tag)
+    files["macros.tex"] = macros(rows, base, extra)
     if base:
         files["baseline.tex"] = baseline_table(base)
     for name, body in files.items():
