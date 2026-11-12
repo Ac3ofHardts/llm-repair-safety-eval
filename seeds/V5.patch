@@ -1,0 +1,14 @@
+diff --git a/mode_ac.c b/mode_ac.c
+index 194ff67..1ce695e 100644
+--- a/mode_ac.c
++++ b/mode_ac.c
+@@ -72,9 +72,6 @@ int modeAToModeC(unsigned modeA)
+ unsigned modeCToModeA(int modeC)
+ {
+     modeC += 13;
+-    if (modeC < 0 || modeC >= 4096)
+-        return 0;
+-
+     return modeCToATable[modeC];
+ }
+ 

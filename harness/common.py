@@ -15,9 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 HARNESS = ROOT / "harness"
 REPOS = ROOT / "repos"
-BENCHMARK = ROOT / "benchmark"
-SEEDS = BENCHMARK / "seeds"
-TESTS = BENCHMARK / "tests"
+SEEDS = ROOT / "seeds"
+TESTS = ROOT / "tests"
 PROMPTS = ROOT / "prompts"
 RESULTS = ROOT / "results"
 
@@ -30,23 +29,12 @@ SAFETY_RULES = ["21.3", "17.2", "15.5", "14.2"]
 CPPCHECK_CFG = ["--max-configs=1"]
 
 
-def is_archive(tag):
-    return tag.startswith("archive")
-
-
-def tag_dir(tag="base"):
-    """Every run tag (settings combination) has its own self-contained results directory."""
-    d = RESULTS / tag
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
 def gens_path(tag="base"):
-    return tag_dir(tag) / "generations.jsonl"
+    return RESULTS / ("generations.jsonl" if tag == "base" else f"generations_{tag}.jsonl")
 
 
 def results_path(tag="base"):
-    return tag_dir(tag) / "results.csv"
+    return RESULTS / ("results.csv" if tag == "base" else f"results_{tag}.csv")
 
 
 def make_run_id(tag, model, task, technique, rep):
@@ -55,7 +43,7 @@ def make_run_id(tag, model, task, technique, rep):
 
 
 def load_config():
-    with open(BENCHMARK / "tasks.json") as f:
+    with open(HARNESS / "tasks.json") as f:
         cfg = json.load(f)
     cfg["by_id"] = {t["id"]: t for t in cfg["tasks"]}
     return cfg

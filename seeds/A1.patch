@@ -1,0 +1,13 @@
+diff --git a/lib.c b/lib.c
+index 2955103..4e3e1d4 100644
+--- a/lib.c
++++ b/lib.c
+@@ -133,7 +133,7 @@ int hexstring2data(char *arg, unsigned char *data, int maxdlen)
+ 	int i;
+ 	unsigned char tmp;
+ 
+-	if (!len || len % 2 || len > maxdlen * 2)
++	if (!len || len % 2)
+ 		return 1;
+ 
+ 	memset(data, 0, maxdlen);

@@ -4,10 +4,10 @@
 Usage:
   python3 harness/eval.py                 # evaluate everything not yet in results.csv
   python3 harness/eval.py --baseline-only # just print per-task baselines (original vs seeded)
-  python3 harness/eval.py --tag t08       # evaluate results/t08/generations.jsonl -> results/t08/results.csv
+  python3 harness/eval.py --tag t08       # evaluate results/generations_t08.jsonl -> results_t08.csv
 
-Writes, under results/<tag>/: results.csv (one row per generation), baselines.json,
-and the patched function for each run in patches/<run_id>.c
+Writes results/results.csv (one row per generation), results/baselines.json,
+and the patched function for each run in results/patches/<run_id>.c
 """
 import argparse
 import csv
@@ -18,7 +18,7 @@ import shutil
 from concurrent.futures import ProcessPoolExecutor
 from collections import Counter
 
-from common import (RESULTS, SAFETY_RULES, build_test, gens_path, is_archive, results_path, tag_dir, extract_function, function_line_range,
+from common import (RESULTS, SAFETY_RULES, build_test, gens_path, results_path, extract_function, function_line_range,
                     include_flags, load_config, make_workdir, misra_violations, normalize_c,
                     run_test, security_warnings, semgrep_loops, splice_function, warning_keys)
 
@@ -60,7 +60,7 @@ def new_count(after: Counter, before: Counter):
     return sum((after - before).values())
 
 
-def evaluate(cfg, rec, base, patch_dir):
+def evaluate(cfg, rec, base):
     task = cfg["by_id"][rec["task"]]
     row = {k: "" for k in FIELDS}
     row.update(run_id=rec["run_id"], tag=rec.get("tag", "base"),
@@ -80,8 +80,8 @@ def evaluate(cfg, rec, base, patch_dir):
             row[k] = False
         return row
 
-    patch_dir.mkdir(exist_ok=True)
-    (patch_dir / f"{rec['run_id'].replace(':', '_')}.c").write_text(fn + "\n")
+    (RESULTS / "patches").mkdir(exist_ok=True)
+    (RESULTS / "patches" / f"{rec['run_id'].replace(':', '_')}.c").write_text(fn + "\n")
 
     orig = base["original"]   # upstream function: used only for the contamination signal
     pre = base["seeded"]      # pre-patch function the model was given: baseline for "new" counts
@@ -171,8 +171,6 @@ def main():
     ap.add_argument("--baseline-only", action="store_true")
     ap.add_argument("--jobs", type=int, default=4, help="parallel evaluations (CPU-bound)")
     args = ap.parse_args()
-    if is_archive(args.tag):
-        raise SystemExit("results/archive/ is a frozen snapshot; evaluate into a new tag instead")
     args.gens = args.gens or str(gens_path(args.tag))
     args.out = args.out or str(results_path(args.tag))
     cfg = load_config()
@@ -182,6 +180,7 @@ def main():
     summary = {tid: {k: {"sec_warnings": [f"{w['tool']}:{w['rule']} L{w['line']}" for w in v["sec"]],
                          "misra": dict(v["misra"]), "loops": dict(v["loops"])}
                      for k, v in prof.items()} for tid, prof in base.items()}
+    (RESULTS / "baselines.json").write_text(json.dumps(summary, indent=2))
     for tid, prof in base.items():
         up_new = {r: prof["original"]["misra"].get(r, 0) - prof["seeded"]["misra"].get(r, 0)
                   for r in SAFETY_RULES}
@@ -190,7 +189,7 @@ def main():
         print(f"  {tid}: sec warnings seeded={len(prof['seeded']['sec'])} "
               f"original={len(prof['original']['sec'])}; MISRA seeded={dict(prof['seeded']['misra'])} "
               f"original={dict(prof['original']['misra'])}; upstream fix introduces {up_new or 'none'}")
-    (tag_dir(args.tag) / "baselines.json").write_text(json.dumps(summary, indent=2))
+    (RESULTS / "baselines.json").write_text(json.dumps(summary, indent=2))
     if args.baseline_only:
         return
 
@@ -217,8 +216,7 @@ def main():
         if new_file:
             w.writeheader()
         with ProcessPoolExecutor(max_workers=args.jobs) as pool:
-            futs = [pool.submit(evaluate, cfg, rec, base[rec["task"]],
-                                 tag_dir(args.tag) / "patches") for rec in todo]
+            futs = [pool.submit(evaluate, cfg, rec, base[rec["task"]]) for rec in todo]
             rows = (fut.result() for fut in futs)
             for k, (rec, row) in enumerate(zip(todo, rows), 1):
                 w.writerow(row)
