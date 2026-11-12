@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this benchmark or harness, please cite it as below."
+title: "Cross-Domain Evaluation of LLM-Assisted Secure Code Generation: Preserving Safety Properties in Automotive and Avionics Firmware"
+type: software
+authors:
+  - family-names: Hardt
+    given-names: Evan C.
+    affiliation: The University of Alabama
+  - family-names: Swartley
+    given-names: Benjamin S.
+    affiliation: The University of Alabama
+repository-code: "https://github.com/Ac3ofHardts/llm-repair-safety-eval"
+license: MIT
+keywords:
+  - large language models
+  - secure code generation
+  - automated program repair
+  - MISRA C
+  - automotive security
+  - avionics security
