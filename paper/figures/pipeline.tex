@@ -1,0 +1,28 @@
+% Evaluation pipeline (TikZ). Included from main.tex.
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+    node distance=0.35cm and 0.3cm,
+    box/.style={draw, rounded corners=2pt, align=center, font=\scriptsize, minimum height=0.6cm, inner sep=3pt},
+    arr/.style={-{Stealth[length=1.6mm]}, thick}
+]
+\node[box, text width=2.6cm] (task) {Seeded task\\(7: A1--A5, V1--V2)};
+\node[box, text width=2.6cm, below=of task] (llm) {2 local LLMs\\T1 / T2 / T3, $n{=}5$};
+\node[box, text width=2.6cm, below=of llm] (patch) {Patched function\\(210 total)};
+\node[box, text width=1.15cm, minimum height=1.1cm, below=0.5cm of patch] (saf) {Safety\\MISRA\\subset};
+\node[box, text width=1.15cm, minimum height=1.1cm, left=0.15cm of saf] (sec) {Security\\Cppcheck,\\Semgrep, ASan};
+\node[box, text width=1.15cm, minimum height=1.1cm, right=0.15cm of saf] (fun) {Functional\\unit tests};
+\node[box, text width=4.6cm, below=0.5cm of saf] (met) {Metrics per technique and domain\\(RQ1, RQ2, RQ3)};
+\draw[arr] (task) -- (llm);
+\draw[arr] (llm) -- (patch);
+\draw[arr] (patch) -- (sec);
+\draw[arr] (patch) -- (saf);
+\draw[arr] (patch) -- (fun);
+\draw[arr] (sec) -- (met);
+\draw[arr] (saf) -- (met);
+\draw[arr] (fun) -- (met);
+\draw[arr, dashed] (sec.west) -- ++(-0.25,0) |- node[pos=0.25, left, font=\tiny, align=right]{T3\\feedback\\($\leq$3)} (llm.west);
+\end{tikzpicture}
+\caption{Evaluation pipeline. Every patch is checked on all three axes by one shared harness; T3 feeds analyzer warnings back to the model for up to three calls.}
+\label{fig:pipeline}
+\end{figure}

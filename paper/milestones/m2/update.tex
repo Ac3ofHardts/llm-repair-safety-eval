@@ -1,0 +1,130 @@
+\documentclass[12pt]{article}
+\usepackage[english]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tabularx}
+\usepackage{fancyhdr}
+\usepackage[table]{xcolor}
+\usepackage{graphicx}
+\usepackage{parskip}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{vmargin}
+\setmarginsrb{3 cm}{1 cm}{3 cm}{1 cm}{1 cm}{1.5 cm}{1 cm}{1.5 cm}
+
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, allcolors=blue}
+
+% ---- Set this before submitting -------------------------------------------
+\newcommand{\repourl}{\url{https://github.com/Ac3ofHardts/llm-repair-safety-eval}}
+% ---------------------------------------------------------------------------
+
+\title{Research Project Milestone 2: Progress Update}
+\author{CS 544-001}
+
+\makeatletter
+\let\thetitle\@title
+\let\theauthor\@author
+\makeatother
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\theauthor}
+\lhead{\thetitle}
+\cfoot{\thepage}
+
+\begin{document}
+
+\begin{titlepage}
+	\centering
+    \includegraphics[scale = 0.05]{../../assets/University-of-Alabama-Symbol.png}\\[1.0 cm]
+    \textsc{{\LARGE The University of Alabama}}\\[1.0 cm]
+    \textsc{{\Large 544-001 Software Security}}\\[0.5 cm]
+	\rule{\linewidth}{0.2 mm} \\[0.4 cm]
+	{ \huge \bfseries \thetitle}\\
+	\rule{\linewidth}{0.2 mm} \\[1.0 cm]
+    {\large \emph{Cross-Domain Evaluation of LLM-Assisted Secure Code Generation:\\Preserving Safety Properties in Automotive and Avionics Firmware}}\\[1.5 cm]
+
+	\begin{minipage}{0.4\textwidth}
+		\begin{flushleft} \large
+			\emph{\textbf{Submitted By:}}
+		    \\ Evan C Hardt
+            \\ echardt@crimson.ua.edu
+            \\ \vspace{\baselineskip}
+            Benjamin S Swartley
+            \\ bsswartley@crimson.ua.edu
+		\end{flushleft}
+	\end{minipage}~
+	\begin{minipage}{0.4\textwidth}
+		\begin{flushright} \large
+			\emph{\textbf{Submitted To:}}
+            \\ Dr. Md Rayhanur Rahman
+            \\ Assistant Professor
+            \\ mdrayhanur.rahman@ua.edu
+            \\ Computer Science
+		\end{flushright}
+	\end{minipage}\\[2 cm]
+\end{titlepage}
+
+\section{Summary}
+This update accompanies the expanded paper draft (\texttt{main.pdf}). Since Milestone~1 we built and validated the full evaluation harness, verified all seven seeded weaknesses, and completed the planned experiment: 7 tasks $\times$ 3 techniques $\times$ 5 repetitions $\times$ 2 models $=$ \textbf{210 generated patches}, each evaluated for security, safety-rule compliance, and functionality. The research questions are unchanged. RQ1 and RQ2 now have clear answers from the data; RQ3 shows domain differences, but they are confounded with the two avionics tasks, so the main work remaining for Milestone~3 is adding avionics tasks.
+
+\section{What Was Completed}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Evaluation harness.} Python scripts that apply each seed, prompt the models through a local Ollama server, extract and splice the returned function, and evaluate it: GCC with AddressSanitizer and UBSan, Cppcheck, Semgrep, the Cppcheck MISRA addon, and a custom loop rule. The harness resumes after interruption and logs every prompt, response, and model digest. It was tested end to end before the real run, including against the upstream fixes as known-correct patches.
+    \item \textbf{Seeded tasks.} Seven tasks (five automotive, two avionics; five synthetic, two reconstructed from real upstream fixes), each with a sanitizer-backed trigger test and a functional test suite. All seven passed verification: the original function passes both tests, and the seeded function fails its trigger test.
+    \item \textbf{Experiment.} All 210 patches generated on one RTX~4090 with Qwen2.5-Coder-32B and Codestral-22B (35.2 GPU-minutes in total) and evaluated.
+    \item \textbf{Paper.} Expanded draft with four new related-work papers, a complete methodology, results for all three research questions, threats to validity, and the full prompts in an appendix.
+\end{itemize}
+
+\section{Key Findings So Far}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Security fixes often break safety rules.} 117 of 210 patches (56\%) fixed the weakness, but 44 of those 117 (38\%) introduced a new MISRA violation. All 106 new violations were Rule~15.5 (single point of exit), from early-return guard clauses; no model introduced heap allocation, recursion, or unbounded loops.
+    \item \textbf{Asking for security changes the shape of the fix, not its success.} The security-focused prompt fixed about as many weaknesses as plain review (38 versus 36 of 70) but nearly doubled introduced safety violations (30 versus 16 of 70).
+    \item \textbf{Security and safety tools measure different things.} They disagreed on 38\% of patches, almost always with the security tools accepting a patch the safety checker rejected. The security tools also flagged none of the seven seeded weaknesses before repair.
+    \item \textbf{Real defects are much harder than synthetic ones.} 74\% of patches fixed the synthetic seeds, but only 10\% fixed the two seeds reconstructed from real upstream fixes. No patch reproduced an upstream fix verbatim.
+    \item \textbf{Human fixes conflict with MISRA too.} The developers' own upstream fixes for two tasks add new Rule~15.5 violations, so the conflict is not specific to LLM output.
+\end{enumerate}
+
+\section{Changes Since Milestone 1}
+\begin{table}[H]
+    \centering
+    \small
+    \begin{tabularx}{\linewidth}{@{}l X X@{}}
+        \toprule
+        \textbf{Item} & \textbf{Change} & \textbf{Reason} \\
+        \midrule
+        can-utils pin & v2025.01 $\rightarrow$ \texttt{master} (\texttt{834ceef}) & Two relevant security fixes landed after the last release \\
+        dump1090 pin & v10.2 $\rightarrow$ v11.1 (\texttt{0339a57}) & v11.1 is the latest release \\
+        Task A3 & Synthetic $\rightarrow$ reconstructed from upstream fix \texttt{cbbad5e} & A real out-of-bounds read fix published after both models' training data was collected \\
+        Tasks V1, V2 & \texttt{mode\_s.c} $\rightarrow$ \texttt{cpr.c} (CWE-369, CWE-20) & The message decoder could not be tested in isolation; \texttt{cpr.c} is self-contained and has upstream tests \\
+        Inference & llama.cpp $\rightarrow$ Ollama 0.40.11 & Already deployed on the GPU host; same backend \\
+        Safety baseline & Upstream $\rightarrow$ pre-patch function & Matches the RQ1 definition; avoids undercounting for reconstructed seeds \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+\section{Division of Work}
+As planned at Milestone~1, Evan Hardt led the automotive (\texttt{can-utils}) tasks and Benjamin Swartley led the avionics (\texttt{dump1090}) tasks. Both authors jointly designed the shared evaluation harness, the MISRA~C rule subset, the metrics, and the cross-domain analysis, and both contributed to the paper draft.
+
+\section{Artifacts}
+The harness, seed patches, test drivers, prompts, analysis rules, and all results (raw generations, per-patch results, baselines, and seed verification) are available at \repourl.
+
+\section{Remaining Work for Milestone 3}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Add avionics tasks.} Seed and verify additional \texttt{dump1090} tasks from its network input parsers (the Beast binary and AVR hex message decoders), ideally from real upstream fixes, and run them through the same design. This is the most important step for RQ3.
+    \item \textbf{Independent samples.} At temperature 0.2, Qwen often produced identical patches across repetitions. We will re-run at a higher temperature or analyze distinct patches, so that statistical tests do not count duplicates.
+    \item \textbf{Qualitative coding.} Classify disagreement cases and the A3, A5, and V2 failures by the kind of change the model made.
+    \item \textbf{Exploratory safety-aware prompt.} Test whether mentioning MISRA~C removes the Rule~15.5 conflict, and at what cost to the fix rate.
+    \item \textbf{Final paper.} Discussion, conclusions, and the complete research paper.
+\end{enumerate}
+
+\section{Risks}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Avionics tasks may be hard to isolate.} The network parsers depend on more of \texttt{dump1090} than \texttt{cpr.c} does. We have confirmed the remaining program links without its main file, so a test driver is feasible. If new tasks cannot be verified in time, RQ3 will be reported as task-level results with the confound stated explicitly.
+    \item \textbf{Compute is not a constraint.} The full experiment took about 35 GPU-minutes, so re-runs and additional tasks fit easily in the remaining time.
+\end{itemize}
+
+\end{document}

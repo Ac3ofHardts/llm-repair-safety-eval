@@ -1,0 +1,343 @@
+\documentclass[12pt]{article}
+\usepackage[english]{babel}
+\usepackage[numbers]{natbib}
+\usepackage{url}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tabularx}
+\usepackage{tabulary}
+\usepackage{fancyhdr}
+\usepackage{color}
+\usepackage[table]{xcolor}
+\usepackage{graphicx}
+\usepackage{parskip}
+\usepackage{float}
+\usepackage{setspace}
+\usepackage{vmargin}
+%\setmarginsrb{3 cm}{2.5 cm}{3 cm}{2.5 cm}{1 cm}{1.5 cm}{1 cm}{1.5 cm}
+\setmarginsrb{3 cm}{1 cm}{3 cm}{1 cm}{1 cm}{1.5 cm}{1 cm}{1.5 cm}
+\setlength{\parindent}{1cm}
+
+\usepackage{listings}
+\definecolor{normal}{HTML}{5fd7ff}
+\definecolor{special}{HTML}{af5faf}
+\definecolor{comment}{HTML}{cb0675}
+\definecolor{string}{HTML}{88aa88}
+\lstset{
+    frame=tb,
+    language=c,
+    aboveskip=3mm,
+    belowskip=3mm,
+    showstringspaces=false,
+    basicstyle={\footnotesize\ttfamily},
+    numbers=none,
+    numberstyle=\tiny\color{normal},
+    keywordstyle=\color{special},
+    commentstyle=\color{comment},
+    stringstyle=\color{string},
+    breaklines=true,
+    breakatwhitespace=true,
+    tabsize=4
+}
+
+\definecolor{highlighter}{RGB}{255,255,0} % Define a color
+
+\newcolumntype{C}{>{\columncolor{highlighter}}c} % Define a new column type 'C' with highlighted background
+
+% Answer environment
+\newenvironment{Answer}{%
+  \par\vspace{\baselineskip}\begingroup
+  \color{blue}%
+  \leftskip=2em % adjust indent as you like
+  \noindent\ignorespaces
+}{%
+   \par\vspace{\baselineskip}\endgroup
+}
+
+% hyperref loaded last to avoid package conflicts
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, allcolors=blue}
+
+\title{Research Project Milestone 1}
+\author{CS 544-001}
+
+\makeatletter
+\let\thetitle\@title
+\let\theauthor\@author
+\let\thedate\@date
+\makeatother
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\theauthor}
+\lhead{\thetitle}
+\cfoot{\thepage}
+
+\begin{document}
+
+\begin{titlepage}
+	\centering
+%     \vspace*{0.5 cm}
+    \includegraphics[scale = 0.05]{../../assets/University-of-Alabama-Symbol.png}\\[1.0 cm]
+    \textsc{{\LARGE The University of Alabama}}\\[1.0 cm]
+   \textsc{{\Large 544-001 Software Security}}\\[0.5 cm]
+	\rule{\linewidth}{0.2 mm} \\[0.4 cm]
+	{ \huge \bfseries \thetitle}\\
+	\rule{\linewidth}{0.2 mm} \\[1.5 cm]
+
+	\begin{minipage}{0.4\textwidth}
+		\begin{flushleft} \large
+			\emph{\textbf{Submitted By:} }
+		    \\ Evan C Hardt
+            \\echardt@crimson.ua.edu
+            \\ \vspace{\baselineskip}
+            Benjamin S Swartley
+            \\ bsswartley@crimson.ua.edu
+			\end{flushleft}
+			\end{minipage}~
+			\begin{minipage}{0.4\textwidth}
+			\begin{flushright} \large
+			\emph{\textbf{Submitted To:} }
+            \\ Dr. Md Rayhanur Rahman
+            \\ Assistant Professor
+            \\mdrayhanur.rahman@ua.edu
+            \\Computer Science
+            \\ \vspace{\baselineskip}
+
+		\end{flushright}
+
+	\end{minipage}\\[2 cm]
+
+\end{titlepage}
+
+\tableofcontents
+\pagebreak
+
+\section{Overview}
+Large language models (LLMs) are increasingly used to generate and repair source code, including code for embedded systems that operate in safety-critical transportation domains such as automotive and avionics electronics. Prior work on LLM-assisted secure code generation evaluates whether a security fix preserves \emph{functional} correctness, but embedded transportation firmware is subject to a stricter requirement: a technique that removes a security weakness may still violate \emph{safety} coding constraints, such as bounded execution time, deterministic control flow, or the absence of dynamic memory allocation, even when the code continues to pass its functional tests. This project investigates whether LLM-assisted secure code generation and repair techniques preserve safety-coding-standard compliance, and whether this tradeoff generalizes across two structurally different transportation protocol domains: text-based automotive CAN bus parsing and binary avionics ADS-B decoding.
+
+\section{Working Title}
+Cross-Domain Evaluation of LLM-Assisted Secure Code Generation: Preserving Safety Properties in Automotive and Avionics Firmware
+
+\section{Project Type}
+\textbf{Empirical research (Option A).} This project extends Project E1 (\emph{Do secure code-generation techniques preserve program functionality?}) by adding a third evaluation axis, safety-coding-standard compliance, and by comparing results across two transportation protocol domains. Evidence will be collected through controlled experiments on seeded weaknesses in open-source code, as described in Section~\ref{sec:method}.
+
+\section{Problem Statement}
+LLM security-focused repair fixes CWEs but may violate safety-critical coding constraints (bounded loops, no dynamic allocation, deterministic control flow). This risk may differ by protocol representation: ASCII-text parsing (CAN) vs.\ binary bit-level decoding (ADS-B) present different CWE surfaces and different LLM failure modes. Standard functional-test evaluation misses both the safety dimension and any domain-dependent variation in it.
+
+This matters for software engineering practice because LLM-based repair is being adopted faster than the evaluation methods that would tell practitioners whether its output is acceptable in regulated domains. A patch that removes a buffer overflow and passes every functional test may still be undeployable in a vehicle or aircraft if, for example, it introduces heap allocation or an unbounded loop.
+
+\section{Preliminary Research Questions}
+\label{sec:rqs}
+Below are the preliminary research questions that will be addressed in this project:
+\begin{enumerate}
+    \item \textbf{RQ1:} Does an LLM security-fix for a CWE in embedded C preserve safety coding-rule compliance (MISRA-C subset)?
+    \item \textbf{RQ2:} Do standard security scanners and safety-rule checkers disagree about the same patched code?
+    \item \textbf{RQ3:} Does this safety/security tradeoff generalize across protocol domains (text-based CAN parsing vs.\ binary ADS-B decoding)?
+\end{enumerate}
+Once the research begins, these questions may be refined or expanded based on the findings and insights gained during the preliminary investigation.
+
+\section{Background and Related Work}
+
+\subsection{Security of LLM-Generated Code}
+Pearce et al.~\citep{pearce2022asleep} found that roughly 40\% of GitHub Copilot's completions for CWE-oriented scenarios contained vulnerabilities, and Perry et al.~\citep{perry2023users} showed in a user study that developers with an AI assistant wrote less secure code while being more confident in it. These studies establish that LLM output cannot be assumed secure, but they target general-purpose code and do not consider safety-coding constraints.
+
+\subsection{Secure Generation and Repair Techniques}
+He and Vechev~\citep{he2023sven} proposed SVEN, which steers a code model toward secure output using learned prefixes, and Pearce et al.~\citep{pearce2023zeroshot} showed that LLMs can repair many vulnerabilities zero-shot, although results are sensitive to prompt wording. This project focuses on the low-cost, prompt-level techniques (plain prompting, security-focused prompting, and static-analysis feedback) that practitioners can adopt without model access.
+
+\subsection{Rethinking the Evaluation of Secure Code Generation, ICSE 2026}
+There is an argument that security and functionality must be evaluated together, since a technique that reduces the number of reported security weaknesses may simultaneously damage a program's required functionality~\citep{rethinking2026}. This project adopts that dual-evaluation principle and extends it with a third axis, safety-coding-standard compliance, which is not addressed by the functionality axis alone. The original work also raises the question of whether a technique that improves security for one programming language generalizes to another; this project reframes that question in terms of protocol \emph{representation} rather than language, asking whether a tradeoff observed for text-based parsing generalizes to binary decoding.
+
+\subsection{Static Analyzer Agreement}
+Lipp et al.~\citep{lipp2022static} found that individual static C analyzers miss a large share of real vulnerabilities and that their results vary considerably between tools. If security analyzers disagree among themselves, there is little reason to expect a security analyzer and a safety-rule checker, which are designed for different goals, to agree about whether a patch is acceptable. This motivates RQ2.
+
+\subsection{MISRA-C / DO-178C as the Safety Standard}
+MISRA-C~\citep{misra2012} and DO-178C~\citep{do178c} are widely recognized safety standards for embedded systems development. MISRA-C provides guidelines for safe and reliable C programming, restricting constructs such as dynamic memory allocation, recursion, and multiple function exit points that are difficult to verify or bound in safety-critical code. DO-178C outlines the processes and practices for ensuring the safety of airborne software systems. This project does not pursue full compliance with either standard; instead, it uses a reduced, checkable rule subset drawn from MISRA-C (Section~\ref{sec:eval}) as an operational definition of ``safety-preserving'' code.
+
+\subsection{The Gap}
+No existing work that we are aware of evaluates LLM-driven security repair against safety-coding constraints, nor examines whether such a tradeoff, if it exists, is consistent across differently structured protocol domains. This project addresses both gaps by pairing a security-focused evaluation pipeline with a safety-rule checker and by applying the same pipeline to two open-source transportation codebases from different domains.
+
+\section{Proposed Research Methodology}
+\label{sec:method}
+
+\subsection{Seeding Procedure}
+Each task is a vulnerable variant of a real function, created so that the weakness and its correct fix are known in advance:
+\begin{itemize}
+    \item \textbf{Pinned baseline:} both repositories are pinned to a single tagged version (Section~\ref{sec:data}), and every task is built from that same baseline.
+    \item \textbf{Two kinds of seeds:} \emph{synthetic} seeds remove or weaken one existing defensive check in the current code; \emph{historical} seeds reverse-apply only the relevant hunk of a real upstream fix commit onto the pinned baseline (e.g., by piping \texttt{git show} for the fix commit into \texttt{git apply -R}), rather than checking out the full older tree. Results are reported separately for the two kinds.
+    \item \textbf{Reproducible patches:} each seed is stored as a patch file in the shared repository, so any task can be rebuilt by applying its patch to the pinned tag.
+    \item \textbf{Confirmed reachability:} each task includes at least one triggering input that produces a fault under AddressSanitizer/UBSan on the seeded variant and not on the original. This input is the ground truth for the weakness and is reused as a security regression test after repair.
+\end{itemize}
+
+\subsection{Generation and Repair Techniques}
+Each task is given to the LLM as the vulnerable function plus the minimal surrounding context (types, macros, and callee signatures) needed to understand it. Three techniques are applied:
+\begin{enumerate}
+    \item \textbf{T1, Baseline prompting:} the model is asked to review and correct the function, with no mention of security.
+    \item \textbf{T2, Security-focused prompting:} the model is told the function processes untrusted input and is asked to fix any security vulnerabilities.
+    \item \textbf{T3, Static-analysis-guided repair:} the model receives the function with its Cppcheck and Semgrep warnings; if warnings remain, the updated warnings are fed back for up to three rounds.
+\end{enumerate}
+No prompt mentions MISRA-C or safety rules. The study deliberately measures whether safety compliance is preserved \emph{incidentally}, which reflects how a developer would typically use a code assistant for a security fix.
+
+\subsection{Experimental Design}
+\label{sec:design}
+The design is fixed in advance as 7 tasks $\times$ 3 techniques $\times$ 5 repetitions $\times$ 2 models, for a total of 210 generated patches. All inference runs locally on a single NVIDIA RTX 4090 (24\,GB VRAM). Two open-weight, instruction-tuned code models from different model families are used, both sized to fit in 24\,GB:
+\begin{itemize}
+    \item \textbf{Qwen2.5-Coder-32B-Instruct}~\citep{qwen25coder} (Alibaba; Apache-2.0 license), quantized to 4-bit (GGUF \texttt{Q4\_K\_M}).
+    \item \textbf{Codestral-22B}~\citep{codestral} (Mistral AI; Mistral Non-Production License, which permits research use), quantized to 4-bit (GGUF \texttt{Q4\_K\_M}).
+\end{itemize}
+Both models are served with llama.cpp~\citep{llamacpp} using a 16k-token context window, sampling temperature 0.2, and a fixed, recorded random seed for each repetition. The exact checkpoint hashes and the llama.cpp build version will be recorded before data collection begins, so that every generated patch can be regenerated. Running locally also removes per-call cost, which makes the planned repetition count practical. Every patch is evaluated with the same harness on all three axes (Section~\ref{sec:eval}), and results are compared side by side across the two codebases.
+
+\section{Planned Data Sources}
+\label{sec:data}
+\begin{itemize}
+    \item \textbf{Automotive:} \texttt{linux-can/can-utils}, \texttt{lib.c}~\citep{canutils} -- the shared CAN-frame parsing and formatting library used across the SocketCAN userspace tools. Actively maintained (pinned to release v2025.01), dual-licensed under GPL-2.0/BSD-3-Clause.
+    \item \textbf{Avionics:} \texttt{flightaware/dump1090}~\citep{dump1090} -- an ADS-B (Mode S) decoder for aircraft transponder messages. Actively maintained (pinned to tagged version v10.2), licensed under BSD/GPL-2+.
+    \item \textbf{Models:} Qwen2.5-Coder-32B-Instruct and Codestral-22B, run locally with llama.cpp, as described in Section~\ref{sec:design}.
+    \item \textbf{Tools:} Cppcheck (with its MISRA addon), Semgrep, GCC/Clang with AddressSanitizer and UBSan.
+\end{itemize}
+
+\begin{table}[H]
+    \centering
+    \small
+    \begin{tabular}{|c|l|p{4.2cm}|p{3.6cm}|l|}
+        \hline
+        \textbf{ID} & \textbf{Codebase} & \textbf{Function} & \textbf{Seeded CWE} & \textbf{Domain} \\
+        \hline
+        A1 & can-utils & \texttt{hexstring2data} (length check removed) & CWE-120 / CWE-787 (buffer overflow) & Automotive \\
+        \hline
+        A2 & can-utils & \texttt{hexstring2data} (odd-length check removed) & CWE-20 (improper input validation) & Automotive \\
+        \hline
+        A3 & can-utils & \texttt{parse\_canframe} (bounds re-check removed in FD/XL branch) & CWE-125 (out-of-bounds read) & Automotive \\
+        \hline
+        A4 & can-utils & \texttt{can\_fd\_dlc2len} (nibble mask removed) & CWE-125 (array index) & Automotive \\
+        \hline
+        A5 & can-utils & \texttt{snprintf\_error\_data} (historical: reverts upstream bounds-check fix) & CWE-787 (buffer overflow) & Automotive \\
+        \hline
+        V1 & dump1090 & \texttt{mode\_s.c} message decode (length/type validation removed) & CWE-125 (out-of-bounds read) & Avionics \\
+        \hline
+        V2 & dump1090 & \texttt{cpr.c} position decode (bounds check on arithmetic removed) & CWE-190 (integer overflow) & Avionics \\
+        \hline
+    \end{tabular}
+    \caption{Planned data sources: seeded tasks by codebase, function, weakness, and domain. All seeds are synthetic except A5.}
+    \label{tab:tasks}
+\end{table}
+
+The current task set is weighted toward the automotive domain (five tasks versus two). Before Milestone 2 we will search the \texttt{dump1090} commit history for real bounds and length fixes that can serve as additional historical seeds, with the goal of a more balanced split. If balance cannot be reached, cross-domain comparisons will be made on per-task rates rather than pooled totals, and the imbalance will be reported as a limitation.
+
+\section{Initial Evaluation Plan}
+\label{sec:eval}
+\begin{itemize}
+    \item \textbf{Security:} Cppcheck and Semgrep CWE rules, the task's sanitizer triggering input, and manual confirmation that the seeded weakness is removed and no new security warnings are introduced.
+    \item \textbf{Safety:} a fixed MISRA-C:2012 rule subset, checked with \texttt{cppcheck --addon=misra}:
+    \begin{itemize}
+        \item no dynamic memory allocation (Rule 21.3);
+        \item no direct or indirect recursion (Rule 17.2);
+        \item single point of exit (Rule 15.5);
+        \item well-formed \texttt{for} loops (Rule 14.2).
+    \end{itemize}
+    Because Rule 14.2 covers only \texttt{for} loops, \texttt{while} and \texttt{do} loops without a fixed bound will be flagged with a custom Semgrep rule or manual inspection. Since the upstream code may not be fully compliant, we measure violations \emph{introduced} by a patch relative to the pre-patch function, not absolute compliance.
+    \item \textbf{Functional:} task-specific unit tests written by the authors (valid, boundary-length, and malformed inputs, plus equivalence with the original upstream function on valid inputs), supplemented by any existing project tests.
+    \item \textbf{Cross-domain comparison:} same metrics computed separately per codebase, compared for consistency/divergence.
+    \item \textbf{Metrics:} CWE-fix rate, safety-violation-introduction rate, functional pass rate, joint success rate (secure, safe, and functional at once), tool disagreement rate, and per-domain variance. Given the small corpus, results will be reported mainly as descriptive statistics, with Fisher's exact test on per-domain pass/fail counts where sample sizes allow.
+\end{itemize}
+
+\section{Project Scope}
+
+\subsection{Scope}
+This is a two-student project consisting of seven seeded tasks drawn from two open-source codebases (five from \texttt{can-utils}, two from \texttt{dump1090}) evaluated against three code-generation and repair techniques (baseline prompting, security-focused prompting, and static-analysis-guided repair), with each generated program assessed along three dimensions: security, safety, and functionality. Work is divided by codebase: one team member leads the automotive (\texttt{can-utils}) task set and evaluation harness, and the other leads the avionics (\texttt{dump1090}) task set and evaluation harness. Both team members jointly design the shared evaluation methodology, the MISRA-C rule subset, and the cross-domain comparison and analysis (Section~V, Proposed Methodology, of the accompanying paper draft), so that results from the two codebases are directly comparable. This division and the added cross-domain research question (RQ3) constitute the proportionally larger scope required of a two-student project relative to a single-codebase, single-student version of this study.
+
+\subsection{Expected Resources}
+\begin{itemize}
+    \item A local workstation with an NVIDIA RTX 4090 (24\,GB VRAM) for all LLM inference: 210 patches in the planned design, plus up to two extra feedback rounds per T3 run. No paid API access is required.
+    \item llama.cpp and 4-bit GGUF checkpoints of Qwen2.5-Coder-32B-Instruct and Codestral-22B (free to download for research use)
+    \item Cppcheck and Semgrep for security static analysis (free, open source)
+    \item Cppcheck's MISRA addon, restricted to the reduced rule subset described above, for safety-rule checking (free, open source)
+    \item A local or containerized Linux build environment with GCC/Clang and sanitizers to compile and test generated C code from both codebases
+    \item Version control and shared documentation (e.g., a shared repository) for coordinating work between the two codebases
+\end{itemize}
+
+\subsection{Major Risks}
+\begin{itemize}
+    \item \textbf{Tooling coverage:} freely available MISRA-C checkers cover only a subset of the full standard. This is mitigated by defining and reporting a fixed, explicit rule subset up front rather than claiming full MISRA compliance.
+    \item \textbf{Data contamination:} both codebases are public, so models may have seen the upstream (fixed) code during training and may reproduce a removed check from memory. Patches will be compared against the upstream code to identify verbatim reproduction, and synthetic and historical seeds will be reported separately.
+    \item \textbf{Coordination risk:} splitting work by codebase between two team members introduces a risk that the two evaluation pipelines drift apart and produce results that are not directly comparable. This is mitigated by building one shared evaluation harness and rule subset before either team member begins running tasks on their assigned codebase.
+    \item \textbf{Null result on generalization:} the cross-domain comparison (RQ3) may find no meaningful difference between the two domains, or may find a difference that the seven-task corpus is too small to characterize with confidence. Either outcome is treated as a reportable finding rather than a project failure, and is discussed as a limitation in the final paper.
+    \item \textbf{Compute and time budget:} all inference shares one GPU, so the two-codebase, three-technique design increases total generation time relative to a single-codebase project. The task, technique, repetition, and model counts are fixed in advance (Section~\ref{sec:design}) to keep the total scope realistic within the course period, and runs are scripted so they can execute unattended.
+    \item \textbf{Model generalizability:} restricting the study to quantized open-weight models that fit in 24\,GB means results may not transfer to larger or proprietary frontier models. This is reported as a limitation; the benefit is a fully reproducible setup with fixed model weights that cannot change silently between runs, as hosted API models can.
+\end{itemize}
+
+\subsection{Ethical and Privacy Considerations}
+This project uses only publicly available, open-source code (\texttt{can-utils} and \texttt{dump1090}) and does not involve human subjects, private data, or live vehicle or aircraft systems. No real automotive or avionics hardware or radio transmission is used at any stage; all generated and evaluated code is compiled and tested in a local or containerized environment. All LLM inference runs locally, so no code or data is sent to third-party services. No personally identifiable information is collected or processed. Accordingly, no IRB review or additional privacy safeguards are anticipated to be required for this project.
+
+
+\begin{thebibliography}{99}
+
+\bibitem{rethinking2026}
+S.-C. Dai, J. Xu, and G. Tao,
+\emph{Rethinking the Evaluation of Secure Code Generation},
+Proceedings of the International Conference on Software Engineering (ICSE), 2026.
+
+\bibitem{pearce2022asleep}
+H. Pearce, B. Ahmad, B. Tan, B. Dolan-Gavitt, and R. Karri,
+\emph{Asleep at the Keyboard? Assessing the Security of GitHub Copilot's Code Contributions},
+Proceedings of the IEEE Symposium on Security and Privacy (SP), 2022, pp.~754--768.
+
+\bibitem{pearce2023zeroshot}
+H. Pearce, B. Tan, B. Ahmad, R. Karri, and B. Dolan-Gavitt,
+\emph{Examining Zero-Shot Vulnerability Repair with Large Language Models},
+Proceedings of the IEEE Symposium on Security and Privacy (SP), 2023, pp.~2339--2356.
+
+\bibitem{he2023sven}
+J. He and M. Vechev,
+\emph{Large Language Models for Code: Security Hardening and Adversarial Testing},
+Proceedings of the ACM SIGSAC Conference on Computer and Communications Security (CCS), 2023, pp.~1865--1879.
+
+\bibitem{perry2023users}
+N. Perry, M. Srivastava, D. Kumar, and D. Boneh,
+\emph{Do Users Write More Insecure Code with AI Assistants?},
+Proceedings of the ACM SIGSAC Conference on Computer and Communications Security (CCS), 2023, pp.~2785--2799.
+
+\bibitem{lipp2022static}
+S. Lipp, S. Banescu, and A. Pretschner,
+\emph{An Empirical Study on the Effectiveness of Static C Code Analyzers for Vulnerability Detection},
+Proceedings of the ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA), 2022, pp.~544--555.
+
+\bibitem{qwen25coder}
+B. Hui \emph{et al.},
+\emph{Qwen2.5-Coder Technical Report},
+arXiv preprint arXiv:2409.12186, 2024.
+
+\bibitem{codestral}
+Mistral AI,
+\emph{Codestral: Hello, World!},
+\url{https://mistral.ai/news/codestral}, 2024.
+
+\bibitem{llamacpp}
+G. Gerganov \emph{et al.},
+\emph{llama.cpp: LLM Inference in C/C++},
+\url{https://github.com/ggml-org/llama.cpp}, accessed 2026.
+
+\bibitem{misra2012}
+MISRA,
+\emph{MISRA C:2012 --- Guidelines for the Use of the C Language in Critical Systems},
+Motor Industry Software Reliability Association, 2012.
+
+\bibitem{do178c}
+RTCA,
+\emph{DO-178C: Software Considerations in Airborne Systems and Equipment Certification},
+RTCA, Inc., 2011.
+
+\bibitem{canutils}
+Linux-CAN Project,
+\emph{can-utils: SocketCAN Userspace Utilities and Tools},
+\url{https://github.com/linux-can/can-utils}, accessed 2026.
+
+\bibitem{dump1090}
+FlightAware,
+\emph{dump1090: A Simple Mode S Decoder for RTLSDR Devices},
+\url{https://github.com/flightaware/dump1090}, accessed 2026.
+
+\end{thebibliography}
+
+\end{document}
