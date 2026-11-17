@@ -1,0 +1,40 @@
+int hexstring2data(char *arg, unsigned char *data, int maxdlen)
+{
+    int len = 0;
+    int i;
+    unsigned char tmp;
+
+    /* Calculate length of the input string without using strlen */
+    while (arg[len] != '\0')
+    {
+        len++;
+    }
+
+    if ((len == 0) || (len % 2 != 0) || (len / 2 > maxdlen))
+    {
+        return 1;
+    }
+
+    memset(data, 0, (size_t)maxdlen);
+
+    for (i = 0; i < len / 2; i++)
+    {
+        tmp = asc2nibble(*(arg + (2 * i)));
+        if (tmp > 0x0F)
+        {
+            return 1;
+        }
+
+        data[i] = (tmp << 4);
+
+        tmp = asc2nibble(*(arg + (2 * i) + 1));
+        if (tmp > 0x0F)
+        {
+            return 1;
+        }
+
+        data[i] |= tmp;
+    }
+
+    return 0;
+}
